@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 
 namespace ServiceStack
 {
@@ -174,13 +175,159 @@ namespace ServiceStack
         private static List<string> crudWriteInterfaces;
         private static List<string> CrudWriteNames => crudWriteInterfaces ??= CrudInterfaceMetadataNames(Write); 
 
+        /// <summary>
+        /// Is AutoQuery or Crud Request API
+        /// </summary>
         public static bool IsCrud(this MetadataOperationType op) => op.IsCrudRead() || op.IsCrudWrite();
+        /// <summary>
+        /// Is AutoQuery Request DTO 
+        /// </summary>
+        public static bool IsCrudRead(this MetadataOperationType op) => op.Request.IsCrudRead();
+        /// <summary>
+        /// Is Crud Request DTO 
+        /// </summary>
+        public static bool IsCrudWrite(this MetadataOperationType op) => op.Request.IsCrudWrite();
+        /// <summary>
+        /// Is AutoQuery or Crud Request DTO
+        /// </summary>
+        public static bool IsCrud(this MetadataType type) => type.IsCrudRead() || type.IsCrudWrite();
+        /// <summary>
+        /// Is AutoQuery Request DTO 
+        /// </summary>
+        public static bool IsCrudRead(this MetadataType type) => type.IsAutoQuery();
+        /// <summary>
+        /// Is AutoQuery Request DTO 
+        /// </summary>
+        public static bool IsAutoQuery(this MetadataType type) => 
+            type.Inherits is { Name: "QueryDb`1" or "QueryDb`2" };
+        /// <summary>
+        /// Is AutoQuery Request DTO 
+        /// </summary>
+        public static bool IsAutoQueryData(this MetadataType type) => 
+            type.Inherits is { Name: "QueryData`1" or "QueryData`2" };
+        /// <summary>
+        /// Is Crud Request DTO 
+        /// </summary>
+        public static bool IsCrudWrite(this MetadataType type) => 
+            type.Implements?.Any(iface => CrudWriteNames.Contains(iface.Name)) == true;
+        /// <summary>
+        /// Is AutoQuery or Crud Request DTO for Data Model 
+        /// </summary>
+        public static bool IsCrud(this MetadataType type, string model) =>
+            type.IsCrudRead(model) || type.IsCrudWrite(model);
+        /// <summary>
+        /// Is Crud Request DTO for Data Model 
+        /// </summary>
+        public static bool IsCrudWrite(this MetadataType type, string model) =>
+            type.IsCrudWrite() && type.Implements.Any(x => CrudWriteNames.Contains(x.Name) && x.FirstGenericArg() == model);
+        /// <summary>
+        /// Is AutoQuery Request DTO for Data Model 
+        /// </summary>
+        public static bool IsCrudRead(this MetadataType type, string model) => type.IsAutoQuery(model);
+        /// <summary>
+        /// Is AutoQuery Request DTO for Data Model 
+        /// </summary>
+        public static bool IsAutoQuery(this MetadataType type, string model) => 
+            type.IsAutoQuery() && type.Inherits.FirstGenericArg() == model;
 
-        public static bool IsCrudWrite(this MetadataOperationType op) => 
-            op.Request.Implements?.Any(iface => CrudWriteNames.Contains(iface.Name)) == true;
+        /// <summary>
+        /// Is ICreateDb or ISaveDb Crud Request DTO 
+        /// </summary>
+        public static bool IsCrudCreate(this MetadataType type) => 
+            type.Implements?.Any(iface => iface.Name is "ICreateDb`1" or "ISaveDb`1") == true;
+        /// <summary>
+        /// Is ICreateDb or ISaveDb Crud Request DTO for Data Model 
+        /// </summary>
+        public static bool IsCrudCreate(this MetadataType type, string model) => 
+            type.Implements?.Any(iface => (iface.Name is "ICreateDb`1" or "ISaveDb`1") && iface.FirstGenericArg() == model) == true;
+        /// <summary>
+        /// Is IPatchDb, IUpdateDb or ISaveDb Crud Request DTO 
+        /// </summary>
+        public static bool IsCrudUpdate(this MetadataType type) => 
+            type.Implements?.Any(iface => iface.Name is "IPatchDb`1" or "IUpdateDb`1" or "ISaveDb`1") == true;
+        /// <summary>
+        /// Is IPatchDb, IUpdateDb or ISaveDb Crud Request DTO for Data Model
+        /// </summary>
+        public static bool IsCrudUpdate(this MetadataType type, string model) => 
+            type.Implements?.Any(iface => (iface.Name is "IPatchDb`1" or "IUpdateDb`1" or "ISaveDb`1") && iface.FirstGenericArg() == model) == true;
+        /// <summary>
+        /// Is ICreateDb, IPatchDb, IUpdateDb or ISaveDb Crud Request DTO 
+        /// </summary>
+        public static bool IsCrudCreateOrUpdate(this MetadataType type) => 
+            type.Implements?.Any(iface => iface.Name is "ICreateDb`1" or "IPatchDb`1" or "IUpdateDb`1" or "ISaveDb`1") == true;
+        /// <summary>
+        /// Is ICreateDb, IPatchDb, IUpdateDb or ISaveDb Crud Request DTO for Data Model
+        /// </summary>
+        public static bool IsCrudCreateOrUpdate(this MetadataType type, string model) => 
+            type.Implements?.Any(iface => (iface.Name is "ICreateDb`1" or "IPatchDb`1" or "IUpdateDb`1" or "ISaveDb`1") && iface.FirstGenericArg() == model) == true;
+        /// <summary>
+        /// Is IDeleteDb Crud Request DTO 
+        /// </summary>
+        public static bool IsCrudDelete(this MetadataType type) => 
+            type.Implements?.Any(iface => iface.Name is "IDeleteDb`1") == true;
+        /// <summary>
+        /// Is IDeleteDb Crud Request DTO for Data Model 
+        /// </summary>
+        public static bool IsCrudDelete(this MetadataType type, string model) => 
+            type.Implements?.Any(iface => iface.Name is "IDeleteDb`1" && iface.FirstGenericArg() == model) == true;
 
-        public static bool IsCrudRead(this MetadataOperationType op) => 
-            op.Request.Inherits?.Name == typeof(QueryDb<>).Name || op.Request.Inherits?.Name == typeof(QueryDb<,>).Name;
+        /// <summary>
+        /// Retrieve AutoQuery Data Model from AutoQuery CRUD APIs
+        /// </summary>
+        public static string CrudModel(this MetadataType type) => 
+            type.Inherits is { Name: "QueryDb`1" or "QueryDb`2" } 
+                ? type.Inherits.FirstGenericArg() 
+                : type.Implements?.FirstOrDefault(iface => CrudWriteNames.Contains(iface.Name)).FirstGenericArg();
+
+        public static string FirstGenericArg(this MetadataTypeName type) => type.GenericArgs?.Length > 0 ? type.GenericArgs[0] : null;
+        
+        public static bool IsRequestDto(this MetadataType type) => HostContext.AppHost?.Metadata.OperationNamesMap.ContainsKey(type.Name) == true
+            || type.ImplementsAny(ApiInterfaces) || type.InheritsAny(ApiBaseTypes);
+
+        private static Type[] AutoQueryInterfaceTypes = new[]
+        {
+            typeof(IQueryDb<>),
+            typeof(IQueryDb<,>),
+            typeof(ICreateDb<>),
+            typeof(IUpdateDb<>),
+            typeof(IPatchDb<>),
+            typeof(IDeleteDb<>),
+            typeof(ISaveDb<>),
+        };
+        public static bool HasNamedConnection(this MetadataType type, string name) => type.Type != null && 
+            (type.Type.FirstAttribute<NamedConnectionAttribute>()?.Name == name || 
+             type.Type.FirstAttribute<ConnectionInfo>()?.NamedConnection == name || 
+             X.Map(type.Type.GetTypeWithGenericTypeDefinitionOfAny(AutoQueryInterfaceTypes), 
+                 x => x.FirstGenericArg()?.FirstAttribute<NamedConnectionAttribute>()?.Name == name));
+
+        public static string[] ApiMarkerInterfaces { get; } = {
+            nameof(IGet),
+            nameof(IPost),
+            nameof(IPut),
+            nameof(IDelete),
+            nameof(IPatch),
+            nameof(IOptions),
+            nameof(IStream),
+        };
+        public static string[] ApiReturnInterfaces { get; } = {
+            typeof(IReturn<>).Name,
+            nameof(IReturnVoid),
+        };
+        public static string[] ApiCrudInterfaces { get; } = {
+            typeof(ICreateDb<>).Name,
+            typeof(IUpdateDb<>).Name,
+            typeof(IPatchDb<>).Name,
+            typeof(IDeleteDb<>).Name,
+            typeof(ISaveDb<>).Name,
+        };
+        public static string[] ApiQueryBaseTypes { get; } = {
+            typeof(QueryDb<>).Name,
+            typeof(QueryDb<,>).Name,
+            typeof(QueryData<>).Name,
+            typeof(QueryData<,>).Name,
+        };
+        public static HashSet<string> ApiInterfaces { get; } = ApiMarkerInterfaces.CombineSet(ApiReturnInterfaces, ApiCrudInterfaces); 
+        public static HashSet<string> ApiBaseTypes { get; } = ApiQueryBaseTypes.ToSet(); 
     }
     
     public struct AutoQueryDtoType

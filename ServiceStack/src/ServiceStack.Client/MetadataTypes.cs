@@ -774,7 +774,13 @@ namespace ServiceStack
         public static bool InheritsAny(this MetadataType type, params string[] typeNames) =>
             type.Inherits != null && typeNames.Contains(type.Inherits.Name);
 
+        public static bool InheritsAny(this MetadataType type, HashSet<string> typeNames) =>
+            type.Inherits != null && typeNames.Contains(type.Inherits.Name);
+
         public static bool ImplementsAny(this MetadataType type, params string[] typeNames) =>
+            type.Implements != null && type.Implements.Any(i => typeNames.Contains(i.Name));
+
+        public static bool ImplementsAny(this MetadataType type, HashSet<string> typeNames) =>
             type.Implements != null && type.Implements.Any(i => typeNames.Contains(i.Name));
 
         public static bool ReferencesAny(this MetadataOperationType op, params string[] typeNames) =>
@@ -900,10 +906,30 @@ namespace ServiceStack
             }
         }
 
+        public static void EachOperation(this AppMetadata app, Action<MetadataOperationType> configure, Predicate<MetadataOperationType> where) 
+        {
+            foreach (var entry in app.GetCache().OperationsMap)
+            {
+                if (!where(entry.Value))
+                    continue;
+                configure(entry.Value);
+            }
+        }
+
         public static void EachType(this AppMetadata app, Action<MetadataType> configure) 
         {
             foreach (var entry in app.GetCache().TypesMap)
             {
+                configure(entry.Value);
+            }
+        }
+
+        public static void EachType(this AppMetadata app, Action<MetadataType> configure, Predicate<MetadataType> where) 
+        {
+            foreach (var entry in app.GetCache().TypesMap)
+            {
+                if (!where(entry.Value))
+                    continue;
                 configure(entry.Value);
             }
         }
@@ -1129,6 +1155,40 @@ namespace ServiceStack
             var prop = type.Properties?.FirstOrDefault(x => x.Name == name);
             if (prop != null) configure(prop);
         }
+        
+        public static MetadataPropertyType ReorderProperty(this MetadataType type, string name, string before = null, string after = null)
+        {
+            var prop = type.Property(name);
+            if (prop == null) 
+                return null;
+            var beforeProp = before != null
+                ? type.Properties.FirstOrDefault(x => x.Name.Equals(before, StringComparison.OrdinalIgnoreCase))
+                : null;
+            if (beforeProp != null)
+                return type.ReorderProperty(name, Math.Max(0, type.Properties.IndexOf(beforeProp)));
+            var afterProp = after != null
+                ? type.Properties.FirstOrDefault(x => x.Name.Equals(after, StringComparison.OrdinalIgnoreCase))
+                : null;
+            if (afterProp != null)
+                return type.ReorderProperty(name, Math.Max(0, type.Properties.IndexOf(afterProp) + 1));
+            return prop;
+        }
+    
+        public static MetadataPropertyType ReorderProperty(this MetadataType type, string name, int index)
+        {
+            var prop = type.Property(name);
+            if (prop == null)
+                return null;
+            type.Properties.Remove(prop);
+            type.Properties.Insert(index, prop);
+            var order = 1;
+            foreach (var p in type.Properties)
+            {
+                if (p.DataMember?.Order != null)
+                    p.DataMember.Order = order++;
+            }
+            return prop;
+        }
 
         public static void EachProperty(this MetadataType type, Func<MetadataPropertyType,bool> where, Action<MetadataPropertyType> configure)
         {
@@ -1140,6 +1200,17 @@ namespace ServiceStack
             }
         }
 
-        public static bool IsSystemType(this MetadataPropertyType prop) => prop.Namespace?.StartsWith("System") == true;
+        public static void RemoveProperty(this MetadataType type, Predicate<MetadataPropertyType> where) => 
+            type.Properties?.RemoveAll(where);
+
+        public static void RemoveProperty(this MetadataType type, string name)
+        {
+            if (name != null) 
+                type.Properties?.RemoveAll(x => x.Name == name);
+        }
+
+        public static bool IsSystemType(this MetadataPropertyType prop) =>
+            prop.PropertyType?.Namespace?.StartsWith("System") == true ||
+            prop.Namespace?.StartsWith("System") == true;
     }
 }
