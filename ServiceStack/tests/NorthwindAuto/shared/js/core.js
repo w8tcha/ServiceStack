@@ -1,4 +1,5 @@
-import { apiValue, isDate, mapGet, padInt, $1, enc, resolve, lastRightPart, combinePaths, leftPart } from "@servicestack/client"
+import { apiValue, isDate, mapGet, padInt, $1, enc, resolve, omit } from "@servicestack/client"
+import { lastRightPart, combinePaths, leftPart, appendQueryString } from "@servicestack/client"
 import { MetadataOperationType, AuthenticateResponse } from "../../lib/types"
 import { Types } from "./Types"
 /*minify:*/
@@ -204,7 +205,7 @@ export const Crud = {
     isDelete: op => hasInterface(op, Crud.Delete),
 }
 
-/** @param {AuthenticateResponse} [session] */
+/** @param {{roles:string[]}} [session] */
 export const isAdminAuth = session => map(session, x => x.roles && x.roles.indexOf('Admin') >= 0)
 
 /** @param {any[]|null} arr */
@@ -220,15 +221,18 @@ export function canAccess(op, auth) {
         return false
     if (isAdminAuth(auth))
         return true;
-    const userRoles = auth.roles || []
-    if (hasItems(op.requiredRoles) && !op.requiredRoles.every(role => userRoles.indexOf(role) >= 0))
+
+    let [roles, permissions] = [auth.roles || [], auth.permissions || []]
+    let [requiredRoles, requiredPermissions, requiresAnyRole, requiresAnyPermission] = [
+        op.requiredRoles || [], op.requiredPermissions || [], op.requiresAnyRole || [], op.requiresAnyPermission || []]
+
+    if (!requiredRoles.every(role => roles.indexOf(role) >= 0))
         return false
-    if (hasItems(op.requiresAnyRole) && !op.requiresAnyRole.some(role => userRoles.indexOf(role) >= 0))
+    if (!requiresAnyRole.some(role => roles.indexOf(role) >= 0))
         return false
-    const userPermissions = auth.permissions || []
-    if (hasItems(op.requiredPermissions) && !op.requiredRoles.every(perm => userPermissions.indexOf(perm) >= 0))
+    if (!requiredPermissions.every(perm => permissions.indexOf(perm) >= 0))
         return false
-    if (hasItems(op.requiresAnyPermission) && !op.requiresAnyPermission.every(perm => userPermissions.indexOf(perm) >= 0))
+    if (!requiresAnyPermission.every(perm => permissions.indexOf(perm) >= 0))
         return false
 
     return true
@@ -241,19 +245,23 @@ export function invalidAccessMessage(op, auth) {
     if (!auth) {
         return `<b>${op.request.name}</b> requires Authentication`
     }
-    let { roles, permissions } = auth
-    if (roles.indexOf('Admin') >= 0) return null
-
-    let missingRoles = op.requiredRoles.filter(x => roles.indexOf(x) < 0)
+    if (isAdminAuth(auth))
+        return null;
+    let [roles, permissions] = [auth.roles || [], auth.permissions || []]
+    let [requiredRoles, requiredPermissions, requiresAnyRole, requiresAnyPermission] = [
+        op.requiredRoles || [], op.requiredPermissions || [], op.requiresAnyRole || [], op.requiresAnyPermission || []]
+    
+    let missingRoles = requiredRoles.filter(x => roles.indexOf(x) < 0)
     if (missingRoles.length > 0)
         return `Requires ${missingRoles.map(x => '<b>' + x + '</b>').join(', ')} Role` + (missingRoles.length > 1 ? 's' : '')
-    let missingPerms = op.requiredPermissions.filter(x => permissions.indexOf(x) < 0)
+    let missingPerms = requiredPermissions.filter(x => permissions.indexOf(x) < 0)
     if (missingPerms.length > 0)
         return `Requires ${missingPerms.map(x => '<b>' + x + '</b>').join(', ')} Permission` + (missingPerms.length > 1 ? 's' : '')
 
+    missingRoles = requiresAnyRole.filter(x => roles.indexOf(x) < 0)
     if (missingRoles.length > 0)
         return `Requires any ${missingRoles.map(x => '<b>' + x + '</b>').join(', ')} Role` + (missingRoles.length > 1 ? 's' : '')
-    missingPerms = op.requiresAnyPermission.filter(x => permissions.indexOf(x) < 0)
+    missingPerms = requiresAnyPermission.filter(x => permissions.indexOf(x) < 0)
     if (missingPerms.length > 0)
         return `Requires any ${missingPerms.map(x => '<b>' + x + '</b>').join(', ')} Permission` + (missingPerms.length > 1 ? 's' : '')
     return null
@@ -544,11 +552,43 @@ export function currency(val) {
 export function bytes(val) {
     return Files.formatBytes(val)
 }
-/** @param {string} val */
-export function link(val, opt) {
+/** @param {string} tag
+ *  @param {string} [child]
+ *  @param {*} [attrs] */
+export function htmlTag(tag,child,attrs) {
+    if (!attrs) attrs = {}
+    let cls = attrs.cls || attrs.className || attrs['class']
+    if (cls) {
+        attrs = omit(attrs,['cls','class','className'])
+        attrs['class'] = cls
+    }
+    return `<${tag}` + Object.keys(attrs).reduce((acc,k) => `${acc} ${k}="${enc(attrs[k])}"`, '') + `>${child||''}</${tag}>`
+}
+
+/** @param {*} attrs */
+function linkAttrs(attrs) {
+    return Object.assign({target:'_blank',rel:'noopener','class':'text-blue-600'},attrs)
+}
+/** @param {string} href 
+ *  @param {*} [opt] */
+export function link(href, opt) {
+    return htmlTag('a', href, linkAttrs({ ...opt, href }))
+}
+/** @param {string} email
+ *  @param {*} [opt] */
+export function linkMailTo(email, opt) {
     if (!opt) opt = {}
-    let attrs = Object.assign({})
-    return `<a>${val}</a>`
+    let { subject, body } = opt
+    let attrs = omit(opt, ['subject','body'])
+    let args = {}
+    if (subject) args.subject = subject
+    if (body) args.body = body
+    return htmlTag('a', email, linkAttrs({...attrs, href:`mailto:${appendQueryString(email,args)}` }))
+}
+/** @param {string} tel
+ *  @param {*} [opt] */
+export function linkTel(tel, opt) {
+    return htmlTag('a', tel, linkAttrs({...opt, href:`tel:${tel}` }))
 }
 /** @param {string} url */
 export function icon(url) {
