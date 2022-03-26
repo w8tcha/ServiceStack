@@ -1,7 +1,7 @@
 <script minify>
 import { delaySet, humanify, createUrl, uniq } from "@servicestack/client"
 import { Crud, map, canAccess, createRequest, apiSend, apiForm, invalidAccessMessage } from "../../shared/js/core"
-import { Forms, getOp, resolveApiUrl, onRoutesEditChange } from "../js/appInit"
+import { Forms, getOp, resolveApiUrl } from "../js/appInit"
 import { Types } from "../../shared/js/Types"
 
 /** @param {MetadataOperationType} op */
@@ -17,6 +17,8 @@ function apiState(op) {
     }
     return {
         op,
+        client,
+        apiState,
         formLayout,
         createModel,
         apiLoading: false,
@@ -30,6 +32,27 @@ function apiState(op) {
             if (!formLayout) return null
             let except = formLayout.map(input => input.id).filter(x => x)
             return this.apiResult && this.apiResult.api.summaryMessage(except)
+        },
+        /** @param {string} id */
+        fieldError(id) {
+            let error = this.error
+            let fieldError = error && error.errors && error.errors.find(x => x.fieldName.toLowerCase() === id.toLowerCase());
+            return fieldError && fieldError.message
+        },
+        /** @param {string} propName
+            @param {({id:string,input:InputInfo,rowClass:string}) => void} [f] */
+        field(propName, f) {
+            let propLower = propName.toLowerCase()
+            let input = (formLayout || []).find(input => (input.id||'').toLowerCase() === propLower)
+            let inputFn = Crud.isCreate(op)
+                ? Forms.forCreate(op.request)
+                : Crud.isPatch(op) || Crud.isUpdate(op)
+                    ? Forms.forEdit(op.request)
+                    : null
+            let field = input && Forms.getGridInput(input, inputFn)
+            //console.log('inputFn',inputFn, field.prop)
+            if (f) f(field)
+            return field
         },
         /** @param {*} [dtoArgs] 
             @param {*} [queryArgs]*/
@@ -175,6 +198,13 @@ App.component('AutoQuery', ({ store, routes, settings }) => {
         get hasState() { return map(this.state, x => x.apiQuery || false) },
         get dataModelName() { return map(this.dataModel, x => x.name) },
 
+        get hasNewComponent() {
+            return this.dataModelName && hasNewComponent(this.dataModelName)
+        },
+        get hasEditComponent() {
+            return this.dataModelName && hasEditComponent(this.dataModelName)
+        },
+
         createRequestArgs() {
             let args = {
                 include:'total',
@@ -258,6 +288,7 @@ App.component('AutoQuery', ({ store, routes, settings }) => {
             return skip
         },
         
+        lastState: null,
         updated() {
             this.skip = parseInt(routes.skip) || 0
             this.prefs = refreshPrefs()
@@ -266,10 +297,12 @@ App.component('AutoQuery', ({ store, routes, settings }) => {
             this.filters = this.columns
                 .map(column => ({ column, ...settings.opProp(routes.op, column.name)}))
             this.filtersCount = this.filters.reduce((acc,x) => acc + x.filters.length,0)
-            if (routes.edit && onRoutesEditChange) onRoutesEditChange()
-            let skipRefresh = routes.edit && this.results.length && !routes.skip
+
+            let newState = `${routes.op}:${routes.skip}>${this.results.length}`
+            let skipRefresh = newState === this.lastState
             if (skipRefresh) return
             this.search()
+            this.lastState = newState
         },
         updatePrefs(prefs) {
             settings.saveOp(routes.op, x => Object.assign(x, prefs))
@@ -377,10 +410,12 @@ App.component('AutoQuery', ({ store, routes, settings }) => {
         <div v-else-if="results.length">
             <div v-if="routes.new" class="p-4">
                 <div v-if="!canCreate" v-scope="EnsureAccess({ store, message:() => invalidCreateAccess, $on:updated })"></div>
+                <div v-else-if="hasNewComponent" v-scope="NewComponent({ store, routes, settings, state:() => state, save:updated, done:() => routes.to({ new:null }) })"></div>
                 <div v-else v-scope="CreateForm({ store, routes, settings, state:() => state, save:updated, done:() => routes.to({ new:null }) })"></div>
             </div>
             <div v-else-if="routes.edit" class="p-4">
                 <div v-if="!canUpdate" v-scope="EnsureAccess({ store, message:() => invalidUpdateAccess, $on:updated })"></div>
+                <div v-else-if="hasEditComponent" v-scope="EditComponent({ store, routes, settings, state:() => state, save:updated, done:() => routes.to({ edit:null }) })"></div>
                 <div v-else v-scope="EditForm({ store, routes, settings, state:() => state, save:updated, done:() => routes.to({ edit:null }) })"></div>
             </div>
             <div v-if="filter" v-scope="FilterColumn({ store, routes, settings, filter:() => filter, save:updated, done:() => filter=null })" class="relative"></div>
