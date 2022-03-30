@@ -20,6 +20,7 @@ APP.api.operations.forEach(op => {
 })
 let appOps = APP.api.operations.filter(op => !op.request.namespace.startsWith('ServiceStack'))
 let appTags = Array.from(new Set(appOps.flatMap(op => op.tags))).sort()
+/** @type {{expanded: boolean, operations: MetadataOperationType[], tag: string}[]} */
 let sideNav = appTags.map(tag => ({
     tag,
     expanded: true,
@@ -43,7 +44,7 @@ let alwaysHideTags = APP.ui.alwaysHideTags || !DEBUG && APP.ui.hideTags
 if (alwaysHideTags) {
     sideNav = sideNav.filter(group => alwaysHideTags.indexOf(group.tag) < 0)
 }
-let cleanSrc = src => src.trim();
-let { CACHE, HttpErrors, OpsMap, TypesMap, FullTypesMap, getOp, getType, isEnum, enumValues, getIcon } = appApis(APP,'explorer')
-let Forms = createForms(OpsMap, TypesMap, APP.ui.explorer.css, APP.ui)
+let appName = 'explorer'
+let Meta = createMeta(APP, appName)
+let Forms = createForms(Meta, APP.ui.explorer.css, APP.ui)
 /*:minify*/

@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 using Funq;
 using NUnit.Framework;
 using ServiceStack;
@@ -19,6 +20,7 @@ public class PublishTasks
     readonly string ProjectDir = Path.GetFullPath("../../../../NorthwindAuto");
     string FromModulesDir => Path.GetFullPath(".");
     string ToModulesDir => Path.GetFullPath("../../src/ServiceStack/modules");
+    readonly string NetCoreTestsDir = Path.GetFullPath("../../../");
     string[] IgnoreUiFiles = { };
     string[] IgnoreAdminUiFiles = { };
 
@@ -55,7 +57,7 @@ public class PublishTasks
         // copy to modules/ui
         transformOptions.CopyAll(
             source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("ui")), 
-            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("ui").AssertDir()), 
+            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("ui")), 
             cleanTarget: true,
             ignore: file => IgnoreUiFiles.Contains(file.VirtualPath),
             afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
@@ -63,7 +65,7 @@ public class PublishTasks
         // copy to modules/locode
         transformOptions.CopyAll(
             source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("locode")), 
-            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("locode").AssertDir()), 
+            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("locode")), 
             cleanTarget: true,
             ignore: file => IgnoreUiFiles.Contains(file.VirtualPath),
             afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
@@ -71,7 +73,7 @@ public class PublishTasks
         // copy to modules/admin-ui
         transformOptions.CopyAll(
             source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("admin-ui")), 
-            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("admin-ui").AssertDir()), 
+            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("admin-ui")), 
             cleanTarget: true,
             ignore: file => IgnoreAdminUiFiles.Contains(file.VirtualPath),
             afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
@@ -79,7 +81,7 @@ public class PublishTasks
         // copy to modules/shared
         transformOptions.CopyAll(
             source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("shared")),
-            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("shared").AssertDir()),
+            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("shared")),
             cleanTarget: true,
             afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
     }
@@ -159,5 +161,153 @@ export declare var APP:AppMetadata
         
         Directory.SetCurrentDirectory(ProjectDir);
         File.WriteAllText(Path.GetFullPath("./lib/types.ts"), dtos);
+    }
+
+    [Test]
+    public async Task Create_TypeScript_Definitions()
+    {
+        Directory.SetCurrentDirectory(NetCoreTestsDir);
+        
+        await ProcessUtils.RunShellAsync("rd /q /s types && tsc",
+            onOut:   Console.WriteLine, 
+            onError: Console.Error.WriteLine);
+    }
+
+    [Test]
+    public async Task Create_TypeScript_Definitions_Publish()
+    {
+        Directory.SetCurrentDirectory(NetCoreTestsDir);
+        await ProcessUtils.RunShellAsync("rd /q /s types && tsc",
+            onOut:   Console.WriteLine, 
+            onError: Console.Error.WriteLine);
+        
+        // Export API Explorer's .d.ts to 'explorer' 
+        Directory.Move("types/ui", "types/explorer");
+        Directory.Move("types/admin-ui", "types/admin");
+
+        FileSystemVirtualFiles.RecreateDirectory("dist");
+        File.Copy("../NorthwindAuto/node_modules/@servicestack/client/dist/index.d.ts", "dist/client.d.ts");
+
+        var memFs = new MemoryVirtualFiles();
+        var typesFs = new FileSystemVirtualFiles("types");
+        var distFs = new FileSystemVirtualFiles("dist");
+
+        var typesFile = typesFs.GetFile("lib/types.d.ts");
+        memFs.WriteFile("0_" + typesFile.Name, typesFile);
+        memFs.TransformAndCopy("shared", typesFs, distFs);
+
+        memFs.Clear();
+        memFs.TransformAndCopy("locode", typesFs, distFs);
+        
+        memFs.Clear();
+        memFs.TransformAndCopy("explorer", typesFs, distFs);
+        
+        memFs.Clear();
+        memFs.TransformAndCopy("admin", typesFs, distFs);
+
+        var libFs = new FileSystemVirtualFiles("../../../../servicestack-ui".AssertDir());
+        libFs.CopyFrom(distFs.GetAllFiles());
+    }
+}
+
+public static class TypeScriptDefinitionUtils
+{
+    private static string Header = @"import { ApiResult, JsonServiceClient } from './client'
+import { App, Forms, MetadataOperationType, MetadataType, MetadataPropertyType, InputInfo, ThemeInfo, LinkInfo, Breakpoints, AuthenticateResponse, AdminUsersInfo } from './shared'
+";
+    private static string Footer = @"export declare var App:App
+export declare var Forms:Forms";
+
+    private static Dictionary<string, string> Headers = new()
+    {
+        ["locode"] = Header,
+        ["explorer"] = Header,
+        ["admin"] = Header,
+    };
+
+    private static Dictionary<string, string> Footers = new()
+    {
+        ["locode"] = Footer + @"
+/** Method arguments of custom Create Form Components */
+export interface CreateComponentArgs {
+    store: typeof store;
+    routes: typeof routes;
+    settings: typeof settings;
+    state: () => State;
+    save: () => void;
+    done: () => void;
+}
+/** Method Signature of custom Create Form Components */
+export declare type CreateComponent = (args:CreateComponentArgs) => Record<string,any>;
+
+/** Method arguments of custom Edit Form Components */
+export interface EditComponentArgs {
+    store: typeof store;
+    routes: typeof routes;
+    settings: typeof settings;
+    state: () => State;
+    save: () => void;
+    done: () => void;
+}
+/** Method signature of custom Edit Form Components */
+export declare type EditComponent = (args:EditComponentArgs) => Record<string,any>;",
+        
+        ["explorer"] = Footer + @"
+/** Method arguments of custom Doc Components */
+export interface DocComponentArgs {
+    store: typeof store;
+    routes: typeof routes;
+    breakpoints: typeof breakpoints;
+    op: () => MetadataOperationType;
+}
+/** Method Signature of custom Doc Components */
+export declare type DocComponent = (args:DocComponentArgs) => Record<string,any>;",
+        
+        ["admin"] = Footer,
+    };
+
+    static FilesTransformer TransformerOptions = new()
+    {
+        FileExtensions =
+        {
+            ["ts"] = new FileTransformerOptions
+            {
+                // BlockTransformers = {
+                //     new RemoveBlock("/**", "*/", Run.IgnoreInDebug),
+                // },
+                LineTransformers = new()
+                {
+                    new RemoveLineStartingWith(new[] { "import " }, ignoreWhiteSpace:false, Run.Always),
+                    new RemoveLineStartingWith("export {};", ignoreWhiteSpace:false, Run.Always),
+                    new RemoveLineStartingWith("export type App = import(", ignoreWhiteSpace:false, Run.Always),
+                    new RemoveLineStartingWith("export type Breakpoints = import(", ignoreWhiteSpace:false, Run.Always),
+                    new RemoveLineStartingWith("export let Forms: import(", ignoreWhiteSpace:false, Run.Always),
+                },
+            },
+        }
+    };
+
+    public static void TransformAndCopy(this MemoryVirtualFiles memFs, string path, FileSystemVirtualFiles typesFs, FileSystemVirtualFiles distFs)
+    {
+        var i = memFs.GetAllFiles().Count() + 1;
+        typesFs.GetDirectory(path).GetAllFiles()
+            .Each(file => memFs.WriteFile(++i + "_" + file.Name, file));
+
+        var wipFs = new MemoryVirtualFiles();
+        TransformerOptions.CopyAll(
+            source: memFs, 
+            target: wipFs,
+            cleanTarget:true,
+            afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
+        
+        var sb = new StringBuilder();
+        if (Headers.TryGetValue(path, out var header))
+            sb.AppendLine(header);
+        wipFs.GetAllFiles()
+            .Each(file => sb.AppendLine(file.ReadAllText()));
+        if (Footers.TryGetValue(path, out var footer))
+            sb.AppendLine(footer);
+        
+        distFs.WriteFile($"{path}.d.ts", sb.ToString());
     }
 }

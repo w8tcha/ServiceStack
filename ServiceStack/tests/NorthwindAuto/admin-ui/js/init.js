@@ -1,7 +1,10 @@
+/**: Used by .d.ts */
+import { MetadataOperationType, MetadataType, MetadataPropertyType, InputInfo, ThemeInfo } from "../../lib/types"
+
 import { JsonServiceClient, lastLeftPart, trimEnd } from "@servicestack/client"
 import { APP } from "../../lib/types"
 import { createForms } from "../../shared/js/createForms"
-import { appApis } from "../../shared/js/core"
+import { createMeta, appObjects } from "../../shared/js/core"
 
 /*minify:*/
 
@@ -22,7 +25,8 @@ function createClient(fn) {
 }
 let client = createClient()
 
-export let { CACHE, HttpErrors, OpsMap, TypesMap, FullTypesMap, getOp, getType, isEnum, enumValues, getIcon } = appApis(APP,'admin-ui')
-export let Forms = createForms(OpsMap, TypesMap, APP.plugins.adminUsers.css, APP.ui)
+let appName = 'admin-ui'
+export let Meta = createMeta(APP, appName)
+export let Forms = createForms(Meta, APP.plugins.adminUsers.css, APP.ui)
 
 /*:minify*/

@@ -1,7 +1,10 @@
+/**: Used by .d.ts */
+import { MetadataOperationType, MetadataType, MetadataPropertyType, InputInfo, ThemeInfo } from "../../lib/types"
+
 import { JsonServiceClient, lastLeftPart, leftPart, trimEnd } from "@servicestack/client"
 import { APP } from "../../lib/types"
 import { createForms } from "../../shared/js/createForms";
-import { appApis } from "../../shared/js/core";
+import { createMeta, appObjects } from "../../shared/js/core";
 /*minify:*/
 //APP.config.debugMode = false
 let BASE_URL = lastLeftPart(trimEnd(document.baseURI,'/'),'/')
@@ -27,7 +30,8 @@ APP.api.operations.forEach(op => {
 
 let appOps = APP.api.operations.filter(op => !op.request.namespace.startsWith('ServiceStack'))
 let appTags = Array.from(new Set(appOps.flatMap(op => op.tags))).sort()
-let sideNav = appTags.map(tag => ({
+/** @type {{expanded: boolean, operations: MetadataOperationType[], tag: string}[]} */
+export let sideNav = appTags.map(tag => ({
     tag,
     expanded: true,
     operations: appOps.filter(op => op.tags.indexOf(tag) >= 0)
@@ -54,8 +58,7 @@ if (alwaysHideTags) {
     sideNav = sideNav.filter(group => alwaysHideTags.indexOf(group.tag) < 0)
 }
 
-let cleanSrc = src => src.trim();
-
-export let { CACHE, HttpErrors, OpsMap, TypesMap, FullTypesMap, getOp, getType, isEnum, enumValues, getIcon } = appApis(APP,'explorer')
-export let Forms = createForms(OpsMap, TypesMap, APP.ui.explorer.css, APP.ui)
+let appName = 'explorer'
+export let Meta = createMeta(APP, appName)
+export let Forms = createForms(Meta, APP.ui.explorer.css, APP.ui)
 /*:minify*/

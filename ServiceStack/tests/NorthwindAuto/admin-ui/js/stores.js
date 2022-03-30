@@ -1,10 +1,25 @@
-import { APP, Authenticate } from "../../lib/types"
+import { ApiResult } from "@servicestack/client"
+import { APP, Authenticate, AuthenticateResponse, LinkInfo, AdminUsersInfo } from "../../lib/types"
+import { useTransitions } from "../../shared/plugins/useTransitions"
+import { Meta } from "./init"
 
 /*minify:*/
-App.useTransitions({ sidebar: true })
+/**
+ * Execute tailwindui.com transition definition rules
+ * @remarks
+ * @type {(prop:string,enter?:boolean) => boolean}
+ * */
+export let transition = useTransitions(App, { sidebar: true })
 
-/**: SignIn:provider */
-let routes = App.usePageRoutes({
+/** Route methods used in Admin UI
+ * @typedef {{tab?:string,provider?:string,q?:string,page?:string,sort?:string,new?:string,edit?:string}} AdminRoutes */
+
+/**
+ * The App's reactive `routes` navigation component used for all App navigation
+ * @remarks
+ * @type {AdminRoutes & {page: string, set: (function(any): void), state: any, to: (function(any): void), href: (function(any): string)}}
+ */
+export let routes = usePageRoutes(App,{
     page:'admin',
     queryKeys:'tab,provider,q,page,sort,new,edit'.split(','),
     handlers: {
@@ -12,7 +27,34 @@ let routes = App.usePageRoutes({
     }
 })
 
-let store = PetiteVue.reactive({
+/**
+ * App's primary reactive store maintaining global functionality for Admin UI
+ * @remarks
+ * @type {{
+ *     adminLink(string): LinkInfo, 
+ *     init(): void, 
+ *     cachedFetch(string): Promise<unknown>, 
+ *     debug: boolean, 
+ *     copied: boolean, 
+ *     auth: AuthenticateResponse|null, 
+ *     readonly authProfileUrl: string|null, 
+ *     readonly displayName: null, 
+ *     readonly link: LinkInfo, 
+ *     readonly isAdmin: boolean, 
+ *     login(any): void, 
+ *     readonly adminUsers: AdminUsersInfo, 
+ *     readonly authRoles: string[], 
+ *     filter: string, 
+ *     baseUrl: string, 
+ *     logout(): void, 
+ *     readonly authLinks: LinkInfo[], 
+ *     SignIn(): Function, 
+ *     readonly adminLinks: LinkInfo[], 
+ *     api: ApiResult<AuthenticateResponse>|null, 
+ *     readonly authPermissions: *
+ * }}
+ */
+export let store = App.reactive({
     copied: false,
     filter: '',
     debug: APP.config.debugMode,
@@ -26,15 +68,19 @@ let store = PetiteVue.reactive({
 
     get adminUsers() { return APP.plugins.adminUsers },
 
+    /** @param {string|any} id
+     *  @return {LinkInfo} */
     adminLink(id) { return APP.ui.adminLinks.find(x => x.id === id) },
 
     get adminLinks() { return APP.ui.adminLinks },
     
     get link() { return this.adminLink(routes.admin) },
 
+    /** @param {string} url
+     *  @return {Promise<any>} */
     cachedFetch(url) {
         return new Promise((resolve,reject) => {
-            let src = CACHE[url]
+            let src = Meta.CACHE[url]
             if (src) {
                 resolve(src)
             } else {
@@ -44,7 +90,7 @@ let store = PetiteVue.reactive({
                         else throw r.statusText
                     })
                     .then(src => {
-                        resolve(CACHE[url] = src)
+                        resolve(Meta.CACHE[url] = src)
                     })
                     .catch(e => {
                         console.error(`fetchCache (${url}):`, e)
@@ -65,6 +111,7 @@ let store = PetiteVue.reactive({
         : NoAuth({ message:`${APP.app.serviceName} API Explorer` })
     },
 
+    /** @param {any} args */
     login(args) {
         let provider = routes.provider || 'credentials'
         let authProvider = APP.plugins.auth.authProviders.find(x => x.name === provider)
@@ -85,7 +132,7 @@ let store = PetiteVue.reactive({
             .then(r => {
                 this.api = r
                 if (r.error && !r.error.message)
-                    r.error.message = HttpErrors[r.errorCode] || r.errorCode
+                    r.error.message = Meta.HttpErrors[r.errorCode] || r.errorCode
                 if (this.api.succeeded) {
                     this.auth = this.api.response
                     setBodyClass({ auth: this.auth })
@@ -107,7 +154,8 @@ let store = PetiteVue.reactive({
     get authPermissions() { return this.auth && this.auth.permissions || [] },
     get authProfileUrl() { return this.auth && this.auth.profileUrl },
     get isAdmin() { return this.authRoles.indexOf('Admin') >= 0 },
-    
+
+    /** @return {LinkInfo[]} */
     get authLinks() {
         let to = []
         let roleLinks = this.auth && APP.plugins.auth && APP.plugins.auth.roleLinks || {} 

@@ -1,5 +1,7 @@
 <script minify>
 import { delaySet, humanify, mapGet } from "@servicestack/client"
+import { Meta, Forms } from "../js/init"
+
 App.components({
     ModalLookup(state, store, routes, settings) {
         let emptyPrefs = {take:10,selectedColumns:[]}
@@ -42,7 +44,7 @@ App.components({
                 this.close()
             },
             fieldName(name) { return humanify(name) },
-            getId(row) { return Forms.getId(getType(routes.op),row) },
+            getId(row) { return Forms.getId(Meta.getType(routes.op),row) },
             /** @param {*} row
              *  @param {MetadataPropertyType} column */
             format(row, column) {
@@ -54,7 +56,7 @@ App.components({
                 return Forms.refInfo(row,column,this.columns)
             },
             close() {
-                App.transition('modal-lookup', false, () => store.modalLookup = null)
+                transition('modal-lookup', false, () => store.modalLookup = null)
             },
             search() {
                 return this.apiSend()
@@ -134,6 +136,9 @@ App.components({
                     .map(column => ({ column, ...settings.opProp(routes.op, column.name)}))
                 this.filtersCount = this.filters.reduce((acc,x) => acc + x.filters.length,0)
                 this.search()
+            },
+            save() {
+                this.updated()
             },
             updatePrefs(prefs) {
                 if (!this.state) return
@@ -237,13 +242,13 @@ App.components({
                         </div>
                     </div>
                 </div>
-                <div v-if="open==='filters'" class="border-b border-gray-200 py-8" v-scope="FilterViews({ routes, settings, filters:() => filters, save:updated, done:() => open='' })"></div>
+                <div v-if="open==='filters'" class="border-b border-gray-200 py-8" v-scope="FilterViews({ routes, settings, filters:() => filters, save, done:() => open='' })"></div>
                 <div v-if="apiLoading" v-scope="Loading()"></div>
                 <div v-else class="mt-3 flex flex-col">
                     <div class="-mx-1">
                         <div class="inline-block min-w-full py-2 align-middle">
                             <div class="shadow-sm ring-1 ring-black ring-opacity-5">
-                                <div v-if="filter" v-scope="FilterColumn({ store, routes, settings, filter:() => filter, save:updated, done:() => filter=null })" class="relative"></div>
+                                <div v-if="filter" v-scope="FilterColumn({ store, routes, settings, filter:() => filter, save, done:() => filter=null })" class="relative"></div>
                                 <table ref="table" class="min-w-full border-separate" style="border-spacing:0">
                                     <thead class="bg-gray-50">
                                     <tr>
