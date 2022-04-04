@@ -1,12 +1,12 @@
 <script minify>
-/** @typedef {{title:string,errorSummary:string,model:*,formLayout:InputInfo[],error:ResponseStatus}} State */
 App.components({
-    /** @param {{state:() => State}} */
+    /** @param {{state:() => ApiState}} args */
     AutoForm({ state, onsubmit, oninput }) {
+        /** @type {ApiState|any} */
         let emptyState = { model:{} }
         return {
             $template: '#form-template',
-            /** @type State */
+            /** @type ApiState */
             get state() { return state && state() || emptyState },
             get api() { return map(this.state, x => x.apiResult && x.apiResult.api) },
             get css() { return map(this.state, x => x.op && x.op.ui && x.op.ui.explorerCss) },

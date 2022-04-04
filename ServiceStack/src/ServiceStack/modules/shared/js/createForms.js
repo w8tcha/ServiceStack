@@ -1,84 +1,8 @@
 /*minify:*/
-/** @typedef {{
- * getId: (type: MetadataType, row: any) => any;
- *     getType: (typeRef: string | {
- *         namespace: string;
- *         name: string;
- *     }) => MetadataType;
- *     inputId: (input: any) => any;
- *     colClass: (fields: any) => string;
- *     inputProp: (prop: any) => {
- *         id: any;
- *         type: any;
- *         'data-type': any;
- *     };
- *     getPrimaryKey: (type: MetadataType) => any;
- *     typeProperties: (type: MetadataType) => MetadataPropertyType[];
- *     relativeTime: (val: string | number | Date, rtf?: Intl.RelativeTimeFormat) => string;
- *     relativeTimeFromMs: (elapsedMs: number, rtf?: Intl.RelativeTimeFormat) => string;
- *     relativeTimeFromDate: (d: Date, from?: Date) => string;
- *     Lookup: {};
- *     lookupLabel: (model: any, id: any, label: string) => any;
- *     refInfo: (row: any, prop: MetadataPropertyType, props: MetadataPropertyType[]) => {
- *         href: {
- *             op: string;
- *             skip: any;
- *             edit: any;
- *             new: any;
- *             $qs: {
- *                 [x: string]: any;
- *             };
- *         };
- *         icon: any;
- *         html: any;
- *     };
- *     fetchLookupValues: (results: any[], props: MetadataPropertyType[], refreshFn: () => void) => void;
- *     theme: ThemeInfo;
- *     formClass: string;
- *     gridClass: string;
- *     opTitle(op: MetadataOperationType): any;
- *     forAutoForm(type: MetadataType): (field: any) => void;
- *     forCreate(type: MetadataType): (field: any) => void;
- *     forEdit(type: MetadataType): (field: any) => void;
- *     getFormProp(id: any, type: any): MetadataPropertyType;
- *     getGridInputs(formLayout: InputInfo[], f?: (args: {
- *         id: any;
- *         input: InputInfo;
- *         rowClass: string;
- *     }) => void): {
- *         id: any;
- *         input: InputInfo;
- *         rowClass: string;
- *     }[];
- *     getGridInput(input: InputInfo, f?: (args: {
- *         id: any;
- *         input: InputInfo;
- *         rowClass: string;
- *     }) => void): {
- *         id: any;
- *         input: InputInfo;
- *         rowClass: string;
- *     };
- *     getFieldError(error: any, id: any): any;
- *     kvpValues(input: any): any;
- *     useLabel(input: any): any;
- *     usePlaceholder(input: any): any;
- *     isRequired(input: any): any;
- *     resolveFormLayout(op: MetadataOperationType): InputInfo[];
- *     formValues(form: any): {};
- *     formData(form: any, op: MetadataOperationType): any;
- *     groupTypes(allTypes: any): any[];
- *     complexProp(prop: any): boolean;
- *     supportsProp(prop: any): boolean;
- *     populateModel(model: any, formLayout: any): any;
- *     apiValue(o: any): any;
- *     format(o: any, prop: MetadataPropertyType): any;
- * }} Forms
- */
 /** @param {Meta} Meta
  *  @param {ApiCss} css 
  *  @param {UiInfo} ui
- *  @return Forms */
+ *  @return {Forms} */
 function createForms(Meta, css, ui) {
     let { OpsMap, TypesMap, getIcon } = Meta
     let operations = Object.values(OpsMap)
@@ -98,6 +22,8 @@ function createForms(Meta, css, ui) {
     let FloatTypes = 'float,double,decimal'.split(',')
     let _id = 0;
     let inputId = input => input && (input.id || `__${input.type||'undefined'}${_id++}`)
+    /** @param {number} fields
+     * @return {string} */
     let colClass = fields => `col-span-12` + (fields === 2 ? ' sm:col-span-6' : fields === 3 ? ' sm:col-span-4' : fields === 4 ? ' sm:col-span-3' : '')
     /** @param {{namespace:string?,name:string}|string} typeRef
         @return {MetadataType} */
@@ -107,11 +33,13 @@ function createForms(Meta, css, ui) {
                 ? TypesMap[typeRef]
                 : TypesMap[typeRef.name]
     }
+    /** @param {string} typeName */
     function inputType(typeName) {
         if (!typeName) return null
         typeName = Types.unwrap(Types.alias(typeName))
         return InputTypes[typeName]
     }
+    /** @param {MetadataPropertyType} prop */
     function inputProp(prop) {
         let id = toCamelCase(prop.name), idLower = id.toLowerCase()
         let propType = Types.unwrap(Types.typeName2(prop.type, prop.genericArgs))
@@ -162,7 +90,8 @@ function createForms(Meta, css, ui) {
             ? type.inherits.genericArgs[0]
             : map(map(type.implements, x => x.find(iFace => Crud.AnyWrite.indexOf(iFace.name) >= 0)), x => x.genericArgs[0])
     }
-    /** @param {MetadataType} type */
+    /** @param {MetadataType} type 
+     * @return {MetadataPropertyType|null} */
     function getPrimaryKey(type) {
         if (!type) return null
         let typeProps = typeProperties(type)
@@ -355,7 +284,7 @@ function createForms(Meta, css, ui) {
             let queryOp = operations.find(op => Crud.isQuery(op) && op.dataModel.name === ref.model)
             if (queryOp != null) {
                 let href = { op:queryOp.request.name, skip:null, edit:null, new:null, $qs: { [ref.refId]: refIdValue } }
-                let html = Forms.format(mapGet(row,prop.name), prop)
+                let html = format(mapGet(row,prop.name), prop)
                 if (ref.refLabel != null) {
                     let colModel = props.find(x => x.type === ref.model)
                     let modelValue = colModel && mapGet(row, colModel.name)
@@ -418,20 +347,68 @@ function createForms(Meta, css, ui) {
             }
         })
     }
-    function createPropState(prop,opName, callback) {
-        let state = Object.assign(createState(opName), { prop, opName, callback })
-        state.dataModel = getType(state.opQuery.dataModel)
-        state.viewModel = getType(state.opQuery.viewModel)
-        state.viewModelColumns = typeProperties(state.viewModel)
-        state.createPrefs = () => settings.lookup(opName)
-        state.selectedColumns = prefs => map(state,
-            s => (hasItems(prefs.selectedColumns)
-                ? prefs.selectedColumns.map(name => s.viewModelColumns.find(x => x.name === name))
-                : s.viewModelColumns).filter(x => !!x)) || []
-        return state
+    /** @param {MetadataPropertyType} prop
+     * @param {string} opName
+     * @param {Function} callback
+     * @return {CrudApisStateProp}
+     */
+    function createPropState(prop, opName, callback) {
+        let state = createState(opName)
+        /** @type {CrudApisStateProp} */
+        let propState = Object.assign(state, { prop, opName, callback,
+            dataModel: getType(state.opQuery.dataModel),
+            viewModel: getType(state.opQuery.viewModel),
+            viewModelColumns: typeProperties(state.viewModel),
+            createPrefs: () => settings.lookup(opName),
+            /** @return {MetadataPropertyType[]} */
+            selectedColumns: prefs => []
+        })
+        propState.selectedColumns = prefs => map(propState,
+        s => (hasItems(prefs.selectedColumns)
+            ? prefs.selectedColumns.map(name => s.viewModelColumns.find(x => x.name === name))
+            : s.viewModelColumns).filter(x => !!x)) || []
+        return propState
     }
-    /** @type Forms */
-    let ret = {
+    /** @param {*} o
+     *  @param {MetadataPropertyType} prop */
+    function format(o, prop) {
+        if (o == null) return ''
+        let val = apiValue(o)
+        let { format } = prop
+        let f = format && formatter(format)
+        if (typeof f != 'function') {
+            f = v => isDate(v)
+                ? useDateFmt(v)
+                : typeof v == 'number'
+                    ? useNumberFmt(v)
+                    : v
+        }
+        let ret = f(val)
+        if (typeof ret == 'object') {
+            return formatObject(ret)
+        }
+        return typeof ret == 'string' && ret[0] !== '<'
+            ? ret.length > maxFieldLength
+                ? `<span title="${enc(ret)}">${enc(trunc(ret,maxFieldLength))}</span>`
+                : enc(ret)
+            : `${ret}`
+    }
+    /** @param {MetadataPropertyType} prop */
+    function supportsProp(prop) {
+        let propType = Types.typeName2(prop.type, prop.genericArgs)
+        if (prop.isValueType || prop.isEnum || inputType(propType))
+            return true
+        if (prop.type === 'List`1') {
+            if (inputType(prop.genericArgs[0]))
+                return true
+            if (map(prop.input, x => x.type === 'file'))
+                return true
+        }
+        console.log('!supportsProp', 'propType', propType, prop.type, prop.genericArgs, map(prop.genericArgs, x => inputType(x[0]))) /*debug*/
+        return false
+    }
+    /** @type {Forms} */
+    return {
         getId,
         getType,
         inputId,
@@ -446,7 +423,8 @@ function createForms(Meta, css, ui) {
         theme,
         formClass: theme.form + (css.form ? ' ' + css.form : ''),
         gridClass: css.fieldset,
-        /** @param {MetadataOperationType} op */
+        /** @param {MetadataOperationType} op 
+         * @return {string} */
         opTitle(op) {
             return op.request.description || humanify(op.request.name).replace(/^Patch/,'Update')
         },
@@ -511,7 +489,7 @@ function createForms(Meta, css, ui) {
             return formLayout.map(input => this.getGridInput(input, f))
         },
         /** @param {InputInfo} input
-            @param {(args:{id,input:InputInfo,rowClass:string}) => void} [f] */
+            @param {(args:{id:string,input:InputInfo,rowClass:string}) => void} [f] */
         getGridInput(input, f) {
             if (input.ignore) return
             let id = inputId(input)
@@ -541,7 +519,7 @@ function createForms(Meta, css, ui) {
         /** @param {MetadataOperationType} op */
         resolveFormLayout(op) {
             if (!op) return null
-            let allProps = typeProperties(op.request).filter(Forms.supportsProp)
+            let allProps = typeProperties(op.request).filter(supportsProp)
             if (op.ui && op.ui.formLayout) {
                 let allPropsMap = allProps.reduce((acc,x) => { acc[x.name] = x; return acc }, {})
                 let ret = op.ui.formLayout.map(input => ({ ...inputProp(allPropsMap[input.id]), ...input }) )
@@ -583,7 +561,8 @@ function createForms(Meta, css, ui) {
             return obj
         },
         /** @param {HTMLFormElement} form
-         *  @param {MetadataOperationType} op */
+         *  @param {MetadataOperationType} op 
+         *  @return {FormData} */
         formData(form,op) {
             let formData = new FormData(form)
             Array.from(form.elements).forEach(e => {
@@ -625,23 +604,12 @@ function createForms(Meta, css, ui) {
             })
             return groups
         },
+        /** @param {MetadataPropertyType} prop */
         complexProp(prop) {
             let propType = Types.typeName2(prop.type, prop.genericArgs)
             return !(prop.isValueType || prop.isEnum || inputType(propType));
         },
-        supportsProp(prop) {
-            let propType = Types.typeName2(prop.type, prop.genericArgs)
-            if (prop.isValueType || prop.isEnum || inputType(propType))
-                return true
-            if (prop.type === 'List`1') {
-                if (inputType(prop.genericArgs[0]))
-                    return true
-                if (map(prop.input, x => x.type === 'file'))
-                    return true
-            }
-            console.log('!supportsProp', 'propType', propType, prop.type, prop.genericArgs, map(prop.genericArgs, x => inputType(x[0]))) /*debug*/
-            return false
-        },
+        supportsProp,
         populateModel(model, formLayout) {
             if (!model || !formLayout) return null
             formLayout.forEach(input => {
@@ -659,32 +627,8 @@ function createForms(Meta, css, ui) {
                     : o.trim()
             return o
         },
-        /** @param {*} o
-         *  @param {MetadataPropertyType} prop */
-        format(o, prop) {
-            if (o == null) return ''
-            let val = apiValue(o)
-            let { format } = prop
-            let f = format && formatter(format) 
-            if (typeof f != 'function') {
-                f = v => isDate(v) 
-                    ? useDateFmt(v) 
-                    : typeof v == 'number'
-                        ? useNumberFmt(v)
-                        : v
-            }
-            let ret = f(val)
-            if (typeof ret == 'object') {
-                return formatObject(ret)
-            }
-            return typeof ret == 'string' && ret[0] !== '<'
-                ? ret.length > maxFieldLength
-                    ? `<span title="${enc(ret)}">${enc(trunc(ret,maxFieldLength))}</span>`
-                    : enc(ret)
-                : `${ret}`
-        }
+        format,
     }
-    return ret
 }
 /**
  * Useful generic collections around Metadata APIs
@@ -725,26 +669,14 @@ function appObjects(app,appName) {
             })
         }
     })
-    return {
-        /** Global Cache */
-        CACHE,
-        /** HTTP Errors specially handled by Locode */
-        HttpErrors,
-        /** Map of Request DTO names to `MetadataOperationType` */
-        OpsMap,
-        /** Map of DTO names to `MetadataType` */
-        TypesMap,
-        /** Map of DTO namespace + names to `MetadataType` */
-        FullTypesMap,
-    }
+    return { CACHE, HttpErrors, OpsMap, TypesMap, FullTypesMap, }
 }
-/** Generic functionality around AppMetadata
- * @typedef {ReturnType<createMeta>} Meta
- */
 /**
  * Generic functionality around AppMetadata
+ * @remarks
  * @param {AppMetadata} app
  * @param {string} appName
+ * @return {Meta}
  */
 function createMeta(app,appName) {
     let { CACHE, HttpErrors, OpsMap, TypesMap, FullTypesMap } = appObjects(app, appName)
@@ -786,11 +718,9 @@ function createMeta(app,appName) {
     }
     let defaultIcon = app.ui.theme.modelIcon ||
         { svg:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12v6s0 3 7 3s7-3 7-3v-6"/><path d="M5 6v6s0 3 7 3s7-3 7-3V6"/><path d="M12 3c7 0 7 3 7 3s0 3-7 3s-7-3-7-3s0-3 7-3Z"/></g></svg>` }
-    /**
-     * Get API Icon
+    /** Get API Icon
      * @param {{op:MetadataOperationType?,type:MetadataType?}} opt
-     * @return {{svg:string}}
-     */
+     * @return {{svg:string}} */
     function getIcon({op,type}) {
         if (op) {
             let img = map(op.request, x => x.icon)
