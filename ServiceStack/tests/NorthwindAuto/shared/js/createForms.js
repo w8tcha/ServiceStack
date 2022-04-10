@@ -127,8 +127,9 @@ export function createForms(Meta, css, ui) {
     /** @param {MetadataType} type 
      *  @param {*} row */
     function getId(type,row) { return map(getPrimaryKey(type), pk => mapGet(row, pk.name)) }
-    
-    let nowMs = () => new Date().getTime() + (defaultFormats.assumeUtc ? new Date().getTimezoneOffset() * 1000 * 60 : 0)
+
+    // Calc TZOffset: (defaultFormats.assumeUtc ? new Date().getTimezoneOffset() * 1000 * 60 : 0)
+    let nowMs = () => new Date().getTime()
 
     let DateChars = ['/','T',':','-']
     /** @param {string|Date|number} val */
@@ -353,7 +354,6 @@ export function createForms(Meta, css, ui) {
                         }
                     })
                     let newIds = lookupIds.filter(id => existingIds.indexOf(`${id}`) === -1)
-                    //console.log('lookup', c.ref.model, lookupIds, existingIds, newIds) /*debug*/
                     if (newIds.length === 0) return
 
                     // /api/QueryEmployees?IdIn=1,2,3&fields=Id,LastName&jsconfig=edv
@@ -386,20 +386,23 @@ export function createForms(Meta, css, ui) {
      */
     function createPropState(prop, opName, callback) {
         let state = createState(opName)
+        let viewModel = getType(state.opQuery.viewModel) 
+        
         /** @type {CrudApisStateProp} */
         let propState = Object.assign(state, { prop, opName, callback,
             dataModel: getType(state.opQuery.dataModel),
-            viewModel: getType(state.opQuery.viewModel),
-            viewModelColumns: typeProperties(state.viewModel),
+            viewModel,
+            viewModelColumns: typeProperties(viewModel),
             createPrefs: () => settings.lookup(opName),
             /** @return {MetadataPropertyType[]} */
             selectedColumns: prefs => []
         })
-
-        propState.selectedColumns = prefs => map(propState,
-        s => (hasItems(prefs.selectedColumns)
-            ? prefs.selectedColumns.map(name => s.viewModelColumns.find(x => x.name === name))
-            : s.viewModelColumns).filter(x => !!x)) || []
+        
+        propState.selectedColumns = prefs => {
+            return propState && hasItems(prefs.selectedColumns)
+                ? prefs.selectedColumns.map(name => propState.viewModelColumns.find(x => x.name === name))
+                : propState.viewModelColumns.filter(x => !!x) || []
+        }
 
         return propState
     }

@@ -50,15 +50,12 @@ export let routes = usePageRoutes(App,{
         onEditChange(fn) {
             onRoutesEditChange = fn
             if (fn == null) lastEditState = null
-            console.log('onEditChange', fn != null, lastEditState, this.edit)
             this.update()
         },
         update() {
-            console.log('update', this.edit, onRoutesEditChange, lastEditState)
             if (this.edit && onRoutesEditChange) {
                 let newState = `${this.op}:${this.edit}`
                 if (lastEditState == null || newState !== lastEditState) {
-                    console.log('onRoutesEditChange.update', onRoutesEditChange, newState, lastEditState)
                     lastEditState = newState
                     onRoutesEditChange()
                 }
@@ -369,7 +366,6 @@ export function apiState(op) {
                     ? Forms.forEdit(op.request)
                     : null
             let field = input && Forms.getGridInput(input, inputFn)
-            //console.log('inputFn',inputFn, field.prop)
             if (f) f(field)
             return field
         },
@@ -407,7 +403,7 @@ export function apiState(op) {
 /** 
  * Return all CRUD API States available for this operation
  * @param {string} opName
- * @return {CrudApisState}
+ * @return {CrudApisState|null}
  */
 export function createState(opName) {
     let op = opName && Server.api.operations.find(x => x.request.name === opName)
@@ -422,7 +418,9 @@ export function createState(opName) {
         /** @param {MetadataOperationType} op
          *  @returns {ApiState|null} */
         function hasApi(op) { 
-            return canAccess(op,store.auth) ? apiState(op) : null 
+            return canAccess(op,store.auth)
+                ? apiState(op) 
+                : null 
         }
 
         let { opQuery, opCreate, opPatch, opUpdate, opDelete } = {
