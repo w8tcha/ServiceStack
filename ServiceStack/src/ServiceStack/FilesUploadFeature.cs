@@ -159,7 +159,7 @@ public class FilesUploadFeature : IPlugin, IHasStringId, IPreInitPlugin
             throw new ArgumentException(Errors.ExceededMinFileBytesFmt.LocalizeFmt(req, location.MinFileBytes), param);
         if (location.MaxFileBytes != null && file.ContentLength > location.MaxFileBytes)
             throw new ArgumentException(Errors.ExceededMaxFileBytesFmt.LocalizeFmt(req, location.MaxFileBytes), param);
-        location.Validate?.Invoke(req, file);
+        location.ValidateUpload?.Invoke(req, file);
     }
 
     public async Task<IVirtualFile?> GetFileAsync(UploadLocation location, IRequest req, IAuthSession session, string vfsPath)
@@ -169,6 +169,7 @@ public class FilesUploadFeature : IPlugin, IHasStringId, IPreInitPlugin
             throw HttpError.NotFound(Errors.NoReadAccess.Localize(req));
 
         var existingFile = location.VirtualFiles.GetFile(vfsPath);
+        location.ValidateDownload?.Invoke(req, existingFile);
         return existingFile;
     }
 
@@ -202,6 +203,7 @@ public class FilesUploadFeature : IPlugin, IHasStringId, IPreInitPlugin
         var existingFile = location.VirtualFiles.GetFile(vfsPath);
         if (existingFile != null)
         {
+            location.ValidateDelete?.Invoke(req, existingFile);
             location.VirtualFiles.DeleteFile(vfsPath);
             return true;
         }
@@ -321,15 +323,45 @@ public readonly struct ResolvedPath
 
 public readonly struct FilesUploadContext
 {
+    /// <summary>
+    /// The current HTTP Request
+    /// </summary>
     public IRequest Request { get; }
+    /// <summary>
+    /// The Request DTO
+    /// </summary>
     public object Dto => Request.Dto;
-    public string FileName { get; }
-    public string FileExtension => FileName.LastRightPart('.');
-    public string DateSegment => DateTime.UtcNow.ToString("yyyy/MM/dd");
+    /// <summary>
+    /// The Request DTO explicitly casted to a strong Type  
+    /// </summary>
     public T GetDto<T>() => (T)Request.Dto;
+    /// <summary>
+    /// The Uploaded file name
+    /// </summary>
+    public string FileName { get; }
+    /// <summary>
+    /// The Uploaded file extension
+    /// </summary>
+    public string FileExtension => FileName.LastRightPart('.');
+    /// <summary>
+    /// Date String Formatted as 'yyyy/MM/dd'
+    /// </summary>
+    public string DateSegment => DateTime.UtcNow.ToString("yyyy/MM/dd");
+    /// <summary>
+    /// The FilesUploadFeature Plugin 
+    /// </summary>
     public FilesUploadFeature Feature { get; }
+    /// <summary>
+    /// The UploadLocation used for this upload
+    /// </summary>
     public UploadLocation Location { get; }
+    /// <summary>
+    /// The User Session associated with this Request
+    /// </summary>
     public IAuthSession Session => Request.GetSession();
+    /// <summary>
+    /// The Authenticated User Id
+    /// </summary>
     public string UserAuthId => Session.UserAuthId;
 
     public FilesUploadContext(FilesUploadFeature feature, UploadLocation location, IRequest request, string fileName)
@@ -350,7 +382,8 @@ public class UploadLocation
         string readAccessRole = RoleNames.AllowAnyUser, string writeAccessRole = RoleNames.AllowAnyUser, 
         string[]? allowExtensions = null, FilesUploadOperation allowOperations = FilesUploadOperation.All, 
         int? maxFileCount = null, long? minFileBytes = null, long? maxFileBytes = null,
-        Action<IRequest,IHttpFile>? validate = null,
+        Action<IRequest,IHttpFile>? validateUpload = null, Action<IRequest,IVirtualFile>? validateDownload = null,
+        Action<IRequest,IVirtualFile>? validateDelete = null,
         Func<IRequest,IVirtualFile,object>? fileResult = null)
     {
         this.Name = name ?? throw new ArgumentNullException(nameof(name));
@@ -363,7 +396,9 @@ public class UploadLocation
         this.MaxFileCount = maxFileCount;
         this.MinFileBytes = minFileBytes;
         this.MaxFileBytes = maxFileBytes;
-        this.Validate = validate;
+        this.ValidateUpload = validateUpload;
+        this.ValidateDownload = validateDownload;
+        this.ValidateDelete = validateDelete;
         this.FileResult = fileResult;
     }
 
@@ -377,7 +412,9 @@ public class UploadLocation
     public long? MinFileBytes { get; set; }
     public long? MaxFileBytes { get; set; }
     public Func<FilesUploadContext,string> ResolvePath { get; set; }
-    public Action<IRequest,IHttpFile>? Validate { get; set; }
+    public Action<IRequest,IHttpFile>? ValidateUpload { get; set; }
+    public Action<IRequest,IVirtualFile>? ValidateDownload { get; set; }
+    public Action<IRequest,IVirtualFile>? ValidateDelete { get; set; }
     Func<IRequest,IVirtualFile,object>? FileResult { get; set; }
 }
 

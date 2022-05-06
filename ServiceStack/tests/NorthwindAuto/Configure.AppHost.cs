@@ -33,7 +33,10 @@ public class AppHost : AppHostBase, IHostingStartup
     // Configure your AppHost with the necessary configuration and dependencies your App needs
     public override void Configure(Container container)
     {
-        // JsConfig.Init(new Config { TextCase = TextCase.PascalCase });
+        // JsConfig.Init(new ServiceStack.Text.Config {
+        //     IncludeNullValues = true,
+        //     TextCase = TextCase.PascalCase
+        // });
         SetConfig(new HostConfig
         {
             //DebugMode = false,
@@ -72,11 +75,15 @@ public class AppHost : AppHostBase, IHostingStartup
         Plugins.Add(new FilesUploadFeature(
             new UploadLocation("profiles", uploadVfs, allowExtensions:FileExt.WebImages,
                 resolvePath:ctx => $"/profiles/{ctx.FileName}"),
+            
             new UploadLocation("game_items", appDataVfs, allowExtensions:FileExt.WebImages),
+            
             new UploadLocation("files", GetVirtualFileSource<FileSystemVirtualFiles>(),
                 resolvePath:ctx => $"/files/{ctx.FileName}"),
+            
             new UploadLocation("users", uploadVfs, allowExtensions:FileExt.WebImages,
                 resolvePath:ctx => $"/profiles/users/{ctx.UserAuthId}.{ctx.FileExtension}"),
+
             new UploadLocation("applications", appDataVfs, maxFileCount: 3, maxFileBytes: 10_000_000,
                 resolvePath: ctx => ctx.GetLocationPath((ctx.Dto is CreateJobApplication create
                     ? $"job/{create.JobId}"
