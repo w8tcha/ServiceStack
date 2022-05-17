@@ -397,6 +397,7 @@ function createForms(Meta, css, ui) {
     }
     /** @param {MetadataPropertyType} prop */
     function supportsProp(prop) {
+        if (prop.input && prop.input.type === 'file') return true
         let propType = Types.typeName2(prop.type, prop.genericArgs)
         if (prop.isValueType || prop.isEnum || inputType(propType))
             return true
@@ -406,7 +407,7 @@ function createForms(Meta, css, ui) {
             if (map(prop.input, x => x.type === 'file'))
                 return true
         }
-        console.log('!supportsProp', 'propType', propType, prop.type, prop.genericArgs, map(prop.genericArgs, x => inputType(x[0]))) /*debug*/
+        console.log('!supportsProp propType', propType, prop.type, prop.genericArgs, map(prop.genericArgs, x => inputType(x[0])), prop.input) /*debug*/
         return false
     }
     /** @type {Forms} */
@@ -561,21 +562,6 @@ function createForms(Meta, css, ui) {
                 obj[el.id] = value
             })
             return obj
-        },
-        /** @param {HTMLFormElement} form
-         *  @param {MetadataOperationType} op 
-         *  @return {FormData} */
-        formData(form,op) {
-            let formData = new FormData(form)
-            Array.from(form.elements).forEach(e => {
-                if (e.type === 'file') {
-                    let file = formData.get(e.name)
-                    if (file.size === 0) {
-                        formData.delete(e.name)
-                    }
-                }
-            })
-            return formData
         },
         groupTypes(allTypes) {
             let allTypesMap = {}

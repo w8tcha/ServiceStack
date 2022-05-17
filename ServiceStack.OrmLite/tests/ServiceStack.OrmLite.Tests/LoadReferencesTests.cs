@@ -258,16 +258,21 @@ namespace ServiceStack.OrmLite.Tests
             db.CreateTable<SelfCustomerAddress>();
             db.CreateTable<MultiSelfCustomer>();
             db.CreateTable<SelfCustomer>();
-            
-            db.DropTable<JobApplication>();
-            db.DropTable<PhoneScreen>();
-            db.CreateTable<PhoneScreen>();
+
             db.CreateTable<JobApplication>();
+            db.CreateTable<PhoneScreen>();
         }
 
         [SetUp]
         public void SetUp()
         {
+            DeleteFromTables();
+        }
+
+        private void DeleteFromTables()
+        {
+            db.DeleteAll<PhoneScreen>();
+            db.DeleteAll<JobApplication>();
             db.DeleteAll<Order>();
             db.DeleteAll<CustomerAddress>();
             db.DeleteAll<Customer>();
