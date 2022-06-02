@@ -1,8 +1,11 @@
 @inherits LayoutComponentBase
 @inject ServiceStackStateProvider AuthStateProvider;
 @inject NavigationManager NavigationManager;
+@inject IJSRuntime JS
 
 <div>
+    <Header />
+
     <Sidebar Collapse=@CollapseSidebar Toggle=@(state => CollapseSidebar = state) />
 
     <div class="md:pl-64 flex flex-col flex-1">
@@ -46,6 +49,7 @@
 
 @code {
     [CascadingParameter] protected Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
     bool CollapseSidebar = false;
 
     string LoginUrl { get; set; } = "/signin";
