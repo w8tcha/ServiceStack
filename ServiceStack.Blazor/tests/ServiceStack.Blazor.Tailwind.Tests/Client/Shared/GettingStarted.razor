@@ -1,6 +1,6 @@
 <section class="py-8 flex">
     <div class="mt-8 mx-auto">
-        <h2 class="mt-2 text-3xl font-extrabold tracking-tight text-gray-900 sm:text-4xl">
+        <h2 class="mt-2 text-3xl font-extrabold tracking-tight text-gray-900 sm:text-4xl text-center">
             Getting Started
         </h2>
         <div>
@@ -13,14 +13,14 @@
                 <section class="w-full flex flex-col justify-center text-center">
                     <div class="mb-2">
                         <div class="flex justify-center text-center">
-                            <a class="archive-url hover:no-underline netcoretemplates_empty" href=@zipUrl("NetCoreTemplates/blazor-wasm")>
+                            <a class="archive-url hover:no-underline netcoretemplates_empty" href=@zipUrl("NetCoreTemplates/blazor-tailwind")>
                                 <div class="bg-white dark:bg-gray-800 px-4 py-4 mr-4 mb-4 rounded-lg shadow-lg text-center items-center justify-center hover:shadow-2xl dark:border-2 dark:border-pink-600 dark:hover:border-blue-600 dark:border-2 dark:border-pink-600 dark:hover:border-blue-600" style="min-width: 150px;">
                                     <div class="text-center font-extrabold flex items-center justify-center mb-2">
                                         <div class="text-4xl text-blue-400 my-3">
                                             <img src="/img/blazor.svg" class="w-14 h-14" />
                                         </div>
                                     </div>
-                                    <div class="text-xl font-medium text-gray-700">Blazor WASM</div>
+                                    <div class="text-xl font-medium text-gray-700">Blazor Tailwind</div>
                                     <div class="flex justify-center h-8"></div>
                                     <span class="archive-name px-4 pb-2 text-blue-600 dark:text-indigo-400">@projectZip</span>
                                     <div class="count mt-1 text-gray-400 text-sm"></div>
@@ -31,8 +31,19 @@
                 </section>
 
                 <div class="py-6 text-center text-xl">
-                    Open with <a href="https://visualstudio.microsoft.com/vs/">Visual Studio 2022</a>
+                    Open with <a class="underline hover:text-green-600" href="https://visualstudio.microsoft.com/vs/">Visual Studio 2022</a> 
+                    or <a class="underline hover:text-green-600" href="https://www.jetbrains.com/rider/">JetBrains Rider</a>
                 </div>
+                <h4 class="py-6 text-center text-xl">
+                    Run Blazor App 
+                    <span class="text-gray-400">in /MyApp</span> 
+                </h4>
+                <ShellCommand>dotnet watch</ShellCommand>
+                <h4 class="py-6 text-center text-xl">
+                    Run Tailwind
+                    <span class="text-gray-400">in /MyApp.Client</span> 
+                </h4>
+                <ShellCommand>npm run ui:dev</ShellCommand>
             </div>
         </div>
     </div>
