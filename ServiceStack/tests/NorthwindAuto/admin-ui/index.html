@@ -41,7 +41,7 @@ DEBUG = true /*debug*/
                 </div>
                 <div class="mx-auto px-4 sm:px-6 md:px-8">
                     <div class="py-4">
-                        <div v-if="routes.admin === ''" v-scope="Dashboard({ store, routes, client })"></div>
+                        <div v-if="routes.admin === ''" v-scope="Dashboard({ store, routes, client, Meta })"></div>
                         <div v-else-if="routes.admin === 'validation'" v-scope="Validation({ store, routes, client, Forms })"></div>
                         <div v-else-if="routes.admin === 'users'" v-scope="AdminUsers({ store, routes, client })"></div>
                     </div>
@@ -75,7 +75,7 @@ Object.assign(window, exports) //import
 import { $1, humanify, combinePaths } from "@servicestack/client"
 import { setBodyClass } from "../shared/js/core"
 
-/*gateway:window.Server=MetadataApp({view:'locode',jsconfig:'eccn,inv:false'})*/
+/*gateway:window.Server=MetadataApp({view:'locode',jsconfig:'eccn,inv:false'})?*/
 function loadAuth(auth) {
     window.AUTH = !auth || auth.responseStatus ? null : auth
     setBodyClass({ auth })

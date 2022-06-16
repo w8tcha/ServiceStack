@@ -25,7 +25,9 @@ public class UiFeature : IPlugin, IPreInitPlugin, IPostInitPlugin, IHasStringId
 
     public List<HtmlModule> HtmlModules { get; } = new();
     
-    public HtmlModule AdminHtmlModule { get; set; } = new("/modules/admin-ui", "/admin-ui");
+    public HtmlModule AdminHtmlModule { get; set; } = new("/modules/admin-ui", "/admin-ui") {
+        DynamicPageQueryStrings = { nameof(MetadataApp.IncludeTypes) }
+    };
     public AdminUi AdminUi { get; set; } = AdminUi.All;
 
     /// <summary>
@@ -162,6 +164,7 @@ public static class UiFeatureUtils
         Id = link.Id,
         Label = link.Label,
         Icon = link.Icon,
-        Href = "../admin-ui" + (string.IsNullOrEmpty(link.Id) ? "" : "/" + link.Id) 
+        Href = "../admin-ui" + (string.IsNullOrEmpty(link.Id) ? "" : "/" + link.Id),
+        Show = link.Show,
     };
 }

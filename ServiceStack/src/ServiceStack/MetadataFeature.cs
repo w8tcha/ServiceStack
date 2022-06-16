@@ -28,7 +28,7 @@ namespace ServiceStack
         public Action<OperationControl> DetailPageFilter { get; set; }
         
         public List<Action<AppMetadata>> AppMetadataFilters { get; } = new();
-        public List<Action<AppMetadata>> AfterAppMetadataFilters { get; } = new();
+        public List<Action<IRequest,AppMetadata>> AfterAppMetadataFilters { get; } = new();
 
         public bool ShowResponseStatusInMetadataPages { get; set; }
         
@@ -50,7 +50,9 @@ namespace ServiceStack
             } },
         };
 
-        public HtmlModule HtmlModule { get; set; } = new("/modules/ui", "/ui");
+        public HtmlModule HtmlModule { get; set; } = new("/modules/ui", "/ui") {
+            DynamicPageQueryStrings = { nameof(MetadataApp.IncludeTypes) }
+        };
 
         public bool EnableNav
         {
@@ -73,6 +75,8 @@ namespace ServiceStack
         }
 
         public Func<string,string> TagFilter { get; set; }
+
+        public bool Localize { get; set; } = true;
 
         public MetadataFeature()
         {
@@ -208,8 +212,16 @@ namespace ServiceStack
         {
             var feature = HostContext.AssertPlugin<MetadataFeature>();
             var typesConfig = nativeTypesMetadata.GetConfig(new TypesMetadata());
+            var includeTypes = req.QueryString["IncludeTypes"];
+            if (includeTypes != null)
+                typesConfig.IncludeTypes = includeTypes.FromJsv<List<string>>();
+            
             feature.ExportTypes.Each(x => typesConfig.ExportTypes.Add(x));
             var metadataTypes = NativeTypesService.ResolveMetadataTypes(typesConfig, nativeTypesMetadata, req);
+            
+            if (includeTypes != null)
+                metadataTypes.RemoveIgnoredTypes(typesConfig);
+
             metadataTypes.Config = null;
             var uiFeature = HostContext.GetPlugin<UiFeature>();
 
@@ -274,9 +286,63 @@ namespace ServiceStack
                 }
             }
 
+            string localize(string text) => text != null 
+                ? appHost.ResolveLocalizedString(text, req) 
+                : null;
+            void localizeInput(InputInfo input)
+            {
+                if (input == null)
+                    return;
+                if (input.Label != null)
+                    input.Label = appHost.ResolveLocalizedString(input.Label, req);
+                if (input.Help != null)
+                    input.Help = appHost.ResolveLocalizedString(input.Help, req);
+                if (input.Placeholder != null)
+                    input.Placeholder = appHost.ResolveLocalizedString(input.Placeholder, req);
+                if (input.Title != null)
+                    input.Title = appHost.ResolveLocalizedString(input.Placeholder, req);
+            }
+            
+            if (feature.Localize)
+            {
+                response.App.ServiceName = localize(response.App.ServiceName);
+                response.App.ServiceDescription = localize(response.App.ServiceDescription);
+                var ui = response.Ui;
+                if (ui != null)
+                {
+                    ui.AdminLinks.Each(x => x.Label = localize(x.Label));
+                }
+                var plugins = response.Plugins;
+                if (plugins != null)
+                {
+                    plugins.Auth?.AuthProviders.Each(x => {
+                        x.Label = localize(x.Label);
+                        x.FormLayout.Each(localizeInput);
+                        if (x.NavItem != null)
+                            x.NavItem.Label = localize(x.NavItem.Label);
+                    });
+                    plugins.Auth?.RoleLinks.Each(entry => entry.Value.Each(x => x.Label = localize(x.Label)));
+                    plugins.AdminUsers?.UserAuth?.Properties.Each(x => localizeInput(x.Input));
+                    plugins.AdminUsers?.FormLayout.Each(localizeInput);
+                }
+                if (response.Api != null)
+                {
+                    var types = response.Api.Types;
+                    var requests = response.Api.Operations.Select(x => x.Request);
+                    var responses = response.Api.Operations.Where(x => x.Response != null).Select(x => x.Response);
+                    var allTypes = new[] { types, requests, responses }.SelectMany(x => x);
+                    foreach (var type in allTypes)
+                    {
+                        type.Description = localize(type.Description);
+                        type.Notes = localize(type.Notes);
+                        type.Properties.Each(x => localizeInput(x.Input));
+                    }
+                }
+            }
+
             foreach (var fn in feature.AfterAppMetadataFilters)
             {
-                fn(response);
+                fn(req,response);
             }
 
             return response;
