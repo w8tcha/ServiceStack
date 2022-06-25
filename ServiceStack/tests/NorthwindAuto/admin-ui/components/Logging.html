@@ -1,0 +1,296 @@
+<script>
+import { RequestLogs } from 'lib/types'
+import { parseCookie, apiValueFmt, fromXsdDuration, fromByteArray } from '@servicestack/client'
+import { isInput } from '../../shared/js/core'
+App.components({
+    Logging: ({store, routes, client, Forms}) => {
+        function parseJwt(token) {
+            let base64Url = token.split('.')[1];
+            let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            let jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function (c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            return JSON.parse(jsonPayload);
+        }
+        
+        let allFields = 'id,dateTime,statusCode,statusDescription,httpMethod,absoluteUri,pathInfo,requestBody,requestDto,userAuthId,sessionId,ipAddress,forwardedFor,referer,headers,formData,items,session,responseDto,errorResponse,exceptionSource,exceptionData,requestDuration,meta'
+        let summaryFields = 'id,statusCode,httpMethod,pathInfo,userAuthId,sessionId,ipAddress,requestDuration'.split(',')
+        let ignoredHeaders = [':method','Cookie']
+        return {
+            $template: '#logging-template',
+            selected: null,
+            api: null,
+            parseCookie,
+            apiValueFmt(obj) {
+                return typeof obj === 'string' && obj.startsWith('PT')
+                    ? fromXsdDuration(obj)
+                    : apiValueFmt(obj)
+                
+            },
+            hasItems(obj) {
+                return !obj ? false : typeof obj === 'object' 
+                    ? Object.keys(obj).length > 0
+                    : obj.length
+            },
+            get errorSummary() {
+                return this.api && this.api.error && this.api.summaryMessage()
+            },
+            /** @type {RequestLogEntry[]} */
+            get results() {
+                return this.api && this.api.response.results || []
+            },
+            get uniqueKeys() {
+                // let show = k => typeof k !== 'string' || k.substring(0, 2) !== '__'
+                // return uniqueKeys(this.results).filter(show)
+                return summaryFields
+            },
+            keyFmt: t => humanize(toPascalCase(t)),
+            update() {
+                apiSend(createClient, new RequestLogs({ take: 100 }))
+                    .then(r => this.api = r.api)
+            },
+            toggle(row) {
+                this.selected = this.selected && this.selected.id === row.id ? null : row
+            },
+            // required to avoid JS errors, as v-if guards not honoured in petite-vue
+            select(arg) {
+                return this.selected && this.selected[arg]
+            },
+            expanded(id) { return map(this.selected, x => x.id === id) },
+            get selectedHeaders() {
+                if (!this.selected || !this.selected.headers) return null
+                return Object.keys(this.selected.headers).filter(x => ignoredHeaders.indexOf(x) < 0)
+                    .reduce((acc,x) => { acc[x] = this.selected.headers[x]; return acc }, {})
+            },
+            get responseHeaders() {
+                if (!this.selected || !this.selected.responseHeaders) return null
+                return Object.keys(this.selected.responseHeaders).filter(x => ignoredHeaders.indexOf(x) < 0)
+                    .reduce((acc,x) => { acc[x] = this.selected.responseHeaders[x]; return acc }, {})
+            },
+            statusColor(status) {
+                return map(status, x => x <= 300 
+                    ? 'text-green-700' : x < 400 ? 'text-amber-600' : x < 500 ? 'text-red-700' : null) || 'text-gray-700'
+            },
+            statusBackground(status,index) {
+                return status < 300 
+                    ? (index % 2 === 0 ? 'bg-white' : 'bg-gray-50') 
+                    : status < 400 ? 'bg-amber-100' : status < 500 ? 'bg-red-100' : 'bg-gray-100'
+            },
+            /** @type {Cookie[]} */
+            get selectedCookies() {
+                let headers = map(this.selected, x => x.headers)
+                return map(headers && headers.Cookie, x => x.split(',').map(parseCookie))
+            },
+            get selectedSession() {
+                return this.selectedCookies && 
+                    map(this.selectedCookies.find(x => x.name === 'ss-id') || this.selectedCookies.find(x => x.name === 'ss-pid'), 
+                        x => ({ key:x.name, value: x.value })) 
+            },
+            get selectedJwt() {
+                let jwt = map(this.selectedCookies, x => x.find(c => c.name === 'ss-tok'))
+                return jwt && parseJwt(jwt.value) 
+            },
+            keydown(e) {
+                if (isInput(e.target) || this.results.length === 0) return
+                let row = this.selected
+                if (!row) return this.selected = this.results[0]
+                let activeIndex = this.results.findIndex(x => x.id === row.id)
+                let navs = {
+                    ArrowUp:   activeIndex - 1,
+                    ArrowDown: activeIndex + 1,
+                    Home: 0,
+                    End: this.results.length -1,
+                }
+                let nextIndex = navs[e.key]
+                if (nextIndex != null) {
+                    this.selected = this.results[nextIndex % this.results.length]
+                    if (e.key.startsWith('Arrow')) {
+                        e.preventDefault()
+                    }
+                }
+            },
+            
+            mounted() {
+                this.update()
+                document.addEventListener('keydown', this.keydown)
+            },
+            unmounted() {
+                document.removeEventListener('keydown', this.keydown)
+            },
+        }
+    } 
+})
+</script>
+<template id="logging-template">
+<section @vue:mounted="mounted" @vue:unmounted="unmounted" ref="section">
+    <div class="flex flex-col">
+        <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
+            <div class="py-2 align-middle inline-block sm:px-6 lg:px-8">
+                <div class="md:shadow border-b border-gray-200 md:rounded-lg">
+                    <table class="divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                        <tr>
+                            <th v-for="k in uniqueKeys" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                                {{keyFmt(k)}}
+                            </th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr v-for="(row,index) in results" :key="row.id" @click="toggle(row)"
+                            :class="['cursor-pointer', expanded(row.id) ? 'bg-indigo-100' : statusBackground(row.statusCode,index) + ' hover:bg-yellow-50']">
+                            <td v-for="k in uniqueKeys" :key="k" class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {{ apiValueFmt(row[k]) }}
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div v-if="selected" class="relative z-20" aria-labelledby="slide-over-title" role="dialog" aria-modal="true">
+        <div class="fixed overflow-hidden">
+            <div class="absolute overflow-hidden">
+                <div class="pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10 sm:pl-16">
+                    <div class="pointer-events-auto w-screen max-w-2xl">
+                        <form v-if="selected" class="flex h-full flex-col overflow-y-scroll bg-white shadow-xl">
+                            <div class="flex-1">
+                                <!-- Header -->
+                                <div class="bg-gray-50 px-4 py-6 sm:px-6">
+                                    <div class="flex items-start justify-between space-x-3">                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+                                        <div class="space-y-1">
+                                            <h2 class="text-lg font-medium text-gray-900 flex">
+                                                <div :class="['font-medium',statusColor(select('statusCode'))]">
+                                                    {{ select('statusCode') }}
+                                                </div>
+                                                <div class="ml-2">
+                                                    {{ select('httpMethod') }} {{ select('pathInfo') }}
+                                                </div>
+                                            </h2>
+                                            <div class="text-sm text-gray-500 flex flex-wrap">
+                                                <div v-if="select('userAuthId')" class="flex items-center" title="User Id">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-0.5 text-gray-500" viewBox="0 0 24 24">
+                                                        <path fill="currentColor" d="M12 2a5 5 0 1 0 5 5a5 5 0 0 0-5-5zm0 8a3 3 0 1 1 3-3a3 3 0 0 1-3 3zm9 11v-1a7 7 0 0 0-7-7h-4a7 7 0 0 0-7 7v1h2v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1z"/>
+                                                    </svg>
+                                                    {{ select('userAuthId') }}
+                                                </div>
+                                                <div v-if="select('ipAddress')" class="ml-2 flex items-center" title="IP Address">
+                                                    <span class="text-gray-500 mr-0.5">IP</span>
+                                                    {{ select('ipAddress') }}
+                                                </div>
+                                                <div v-if="selectedSession" class="ml-2 flex items-center" :title="`${selectedSession && selectedSession.key} cookie`">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-0.5 text-gray-500" viewBox="0 0 24 24">
+                                                        <path fill="currentColor" d="M21 18.5h-6.18A3 3 0 0 0 13 16.68V13.5h3.17a4.33 4.33 0 0 0 1.3-8.5A6 6 0 0 0 6.06 6.63A3.5 3.5 0 0 0 7 13.5h4v3.18a3 3 0 0 0-1.82 1.82H3a1 1 0 0 0 0 2h6.18a3 3 0 0 0 5.64 0H21a1 1 0 0 0 0-2Zm-14-7a1.5 1.5 0 0 1 0-3a1 1 0 0 0 1-1a4 4 0 0 1 7.79-1.29a1 1 0 0 0 .78.67a2.31 2.31 0 0 1 1.93 2.29a2.34 2.34 0 0 1-2.33 2.33Zm5 9a1 1 0 1 1 1-1a1 1 0 0 1-1 1Z"/>
+                                                    </svg>
+                                                    {{ selectedSession && selectedSession.value }}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="flex h-7 items-center">
+                                            <div v-scope="CloseButton({ onclick:() => toggle(selected) })"></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Divider container -->
+                                <div class="space-y-6 py-6 sm:space-y-0 sm:divide-y sm:divide-gray-200 sm:py-0">
+                                    <div v-if="hasItems(select('requestDto'))">
+                                        <div v-scope="PreviewObject({ val:() => select('requestDto') })"></div>
+                                    </div>
+
+                                    <div v-if="hasItems(selectedHeaders)" class="bg-indigo-700 text-white px-3 py-3">
+                                        <div class="flex items-start justify-between space-x-3">
+                                            <h2 class="font-medium text-white">HTTP Headers</h2>
+                                        </div>
+                                    </div>
+                                    <div v-if="hasItems(selectedHeaders)" class="flex overflow-auto">
+                                        <table>
+                                            <tr v-for="(value,key) in selectedHeaders">
+                                                <th class="text-left font-medium align-top py-2 px-4 whitespace-nowrap">
+                                                    <div class=" whitespace-nowrap w-[9em] overflow-hidden" :title="key">
+                                                        {{key}}
+                                                    </div>
+                                                </th>
+                                                <td class="align-top py-2 px-4">
+                                                    {{value}}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                    
+                                    <div v-if="hasItems(responseHeaders)" class="bg-indigo-700 text-white px-3 py-3">
+                                        <div class="flex items-start justify-between space-x-3">
+                                            <h2 class="font-medium text-white">HTTP Response Headers</h2>
+                                        </div>
+                                    </div>
+                                    <div v-if="hasItems(responseHeaders)" class="flex overflow-auto">
+                                        <table>
+                                            <tr v-for="(value,key) in responseHeaders">
+                                                <th class="text-left font-medium align-top py-2 px-4 whitespace-nowrap">
+                                                    <div class=" whitespace-nowrap w-[9em] overflow-hidden" :title="key">
+                                                        {{key}}
+                                                    </div>
+                                                </th>
+                                                <td class="align-top py-2 px-4">
+                                                    {{value}}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </div>
+
+                                    <div v-if="hasItems(selectedCookies)" class="bg-indigo-700 text-white px-3 py-3">
+                                        <div class="flex items-start justify-between space-x-3">
+                                            <h2 class="font-medium text-white">Cookies</h2>
+                                        </div>
+                                    </div>
+                                    <div v-if="hasItems(selectedCookies)" class="flex overflow-auto">
+                                        <table>
+                                            <tr v-for="cookie in selectedCookies">
+                                                <th class="text-left font-medium align-top py-2 px-4">
+                                                    <div class=" whitespace-nowrap w-[9em] overflow-hidden" :title="cookie.name" title="Name">
+                                                        {{cookie.name}}
+                                                    </div>
+                                                </th>
+                                                <td class="align-top py-2 px-4" title="Value">
+                                                    {{cookie.value}}
+                                                </td>
+                                                <td class="align-top py-2 px-4" title="Path">
+                                                    {{cookie.path}}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </div>
+
+                                    <div v-if="hasItems(selectedJwt)" class="bg-indigo-700 text-white px-3 py-3">
+                                        <div class="flex items-start justify-between space-x-3">
+                                            <h2 class="font-medium text-white">JWT</h2>
+                                        </div>
+                                    </div>
+                                    <div v-if="hasItems(selectedJwt)" class="flex overflow-auto">
+                                        <table>
+                                            <tr v-for="(value,key) in selectedJwt">
+                                                <th class="text-left font-medium align-top py-2 px-4 whitespace-nowrap">
+                                                    <div class=" whitespace-nowrap w-[9em] overflow-hidden" :title="key">
+                                                        {{key}}
+                                                    </div>
+                                                </th>
+                                                <td class="align-top py-2 px-4">
+                                                    {{value}}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                    
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</section>
+</template>

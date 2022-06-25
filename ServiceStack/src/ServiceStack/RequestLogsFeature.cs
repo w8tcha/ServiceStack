@@ -8,7 +8,7 @@ using ServiceStack.Web;
 
 namespace ServiceStack
 {
-    public class RequestLogsFeature : IPlugin, Model.IHasStringId
+    public class RequestLogsFeature : IPlugin, Model.IHasStringId, IPreInitPlugin
     {
         public string Id { get; set; } = Plugins.RequestLogs;
         /// <summary>
@@ -49,7 +49,13 @@ namespace ServiceStack
         /// <summary>
         /// Limit access to /requestlogs service to these roles
         /// </summary>
+        [Obsolete("Use AccessRole")]
         public string[] RequiredRoles { get; set; }
+        
+        /// <summary>
+        /// Limit API access to users in role
+        /// </summary>
+        public string AccessRole { get; set; } = RoleNames.Admin;
 
         /// <summary>
         /// Change the RequestLogger provider. Default is InMemoryRollingRequestLogger
@@ -62,7 +68,7 @@ namespace ServiceStack
         public Type[] ExcludeRequestDtoTypes { get; set; }
 
         /// <summary>
-        /// Don't log request bodys for services with sensitive information.
+        /// Don't log request body's for services with sensitive information.
         /// By default Auth and Registration requests are hidden.
         /// </summary>
         public Type[] HideRequestBodyForRequestDtoTypes { get; set; }
@@ -80,8 +86,7 @@ namespace ServiceStack
         /// <summary>
         /// Never attempt to serialize these types
         /// </summary>
-        public List<Type> IgnoreTypes { get; set; } = new List<Type> {
-        };
+        public List<Type> IgnoreTypes { get; set; } = new();
         
         /// <summary>
         /// Allow ignoring 
@@ -110,11 +115,14 @@ namespace ServiceStack
         {
             this.AtRestPath = "/requestlogs";
             this.IgnoreFilter = DefaultIgnoreFilter;
-            this.RequiredRoles = new[] { RoleNames.Admin };
             this.EnableErrorTracking = true;
             this.EnableRequestBodyTracking = false;
             this.LimitToServiceRequests = true;
-            this.ExcludeRequestDtoTypes = new[] { typeof(RequestLogs) };
+            this.ExcludeRequestDtoTypes = new[]
+            {
+                typeof(RequestLogs),
+                typeof(HotReloadFiles),
+            };
             this.HideRequestBodyForRequestDtoTypes = new[] {
                 typeof(Authenticate), typeof(Register)
             };
@@ -131,7 +139,7 @@ namespace ServiceStack
             requestLogger.EnableRequestBodyTracking = EnableRequestBodyTracking;
             requestLogger.LimitToServiceRequests = LimitToServiceRequests;
             requestLogger.SkipLogging = SkipLogging;
-            requestLogger.RequiredRoles = RequiredRoles;
+            requestLogger.RequiredRoles = RequiredRoles ?? new []{ AccessRole };
             requestLogger.EnableErrorTracking = EnableErrorTracking;
             requestLogger.ExcludeRequestDtoTypes = ExcludeRequestDtoTypes;
             requestLogger.HideRequestBodyForRequestDtoTypes = HideRequestBodyForRequestDtoTypes;
@@ -154,19 +162,35 @@ namespace ServiceStack
                 });
             }
 
-            appHost.ConfigurePlugin<MetadataFeature>(
-                feature => feature.AddDebugLink(AtRestPath, "Request Logs"));
-            
-            appHost.GetPlugin<MetadataFeature>()?.ExportTypes.Add(typeof(RequestLogEntry));
+            appHost.ConfigurePlugin<MetadataFeature>(feature =>
+            {
+                feature.ExportTypes.Add(typeof(RequestLogEntry));
+                feature.AddDebugLink(AtRestPath, "Request Logs");
+            });
             
             appHost.AddToAppMetadata(meta => {
                 meta.Plugins.RequestLogs = new RequestLogsInfo {
+                    AccessRole = AccessRole,
                     RequiredRoles = RequiredRoles,
                     ServiceRoutes = new Dictionary<string, string[]> {
                         { nameof(RequestLogsService), new[] {AtRestPath} },
                     },
                     RequestLogger = requestLogger.GetType().Name,
                 };
+            });
+        }
+
+        public void BeforePluginsLoaded(IAppHost appHost)
+        {
+            appHost.ConfigurePlugin<UiFeature>(feature =>
+            {
+                var role = RequiredRoles?.Length > 0 ? RequiredRoles[0] : AccessRole; 
+                feature.AddAdminLink(AdminUi.Logging, new LinkInfo {
+                    Id = "logging",
+                    Label = "Logging",
+                    Icon = Svg.ImageSvg(Svg.Create(Svg.Body.Logs)),
+                    Show = $"role:{role}",
+                });
             });
         }
     }
