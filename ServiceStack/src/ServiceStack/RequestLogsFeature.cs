@@ -27,10 +27,20 @@ namespace ServiceStack
         public bool EnableRequestBodyTracking { get; set; }
 
         /// <summary>
+        /// Turn On/Off Raw Request Body Tracking per-request
+        /// </summary>
+        Func<IRequest, bool> FilterRequestBodyTracking { get; set; }
+
+        /// <summary>
         /// Turn On/Off Tracking of Responses
         /// </summary>
         public bool EnableResponseTracking { get; set; }
 
+        /// <summary>
+        /// Turn On/Off Tracking of Responses per-request
+        /// </summary>
+        Func<IRequest, bool> FilterResponseTracking { get; set; }
+        
         /// <summary>
         /// Turn On/Off Tracking of Exceptions
         /// </summary>
@@ -98,13 +108,16 @@ namespace ServiceStack
         /// </summary>
         public Func<DateTime> CurrentDateFn { get; set; } = () => DateTime.UtcNow;
 
+        /// <summary>
+        /// Default take, if none is specified
+        /// </summary>
+        public int DefaultLimit { get; set; } = 100;
         
         public bool DefaultIgnoreFilter(object o)
         {
             var type = o.GetType();
             return IgnoreTypes?.Contains(type) == true || o is IDisposable;
         }
-        
 
         public RequestLogsFeature(int capacity) : this()
         {
@@ -136,7 +149,9 @@ namespace ServiceStack
             var requestLogger = RequestLogger ?? new InMemoryRollingRequestLogger(Capacity);
             requestLogger.EnableSessionTracking = EnableSessionTracking;
             requestLogger.EnableResponseTracking = EnableResponseTracking;
+            requestLogger.FilterResponseTracking = FilterResponseTracking;
             requestLogger.EnableRequestBodyTracking = EnableRequestBodyTracking;
+            requestLogger.FilterRequestBodyTracking = FilterRequestBodyTracking;
             requestLogger.LimitToServiceRequests = LimitToServiceRequests;
             requestLogger.SkipLogging = SkipLogging;
             requestLogger.RequiredRoles = RequiredRoles ?? new []{ AccessRole };
@@ -176,6 +191,7 @@ namespace ServiceStack
                         { nameof(RequestLogsService), new[] {AtRestPath} },
                     },
                     RequestLogger = requestLogger.GetType().Name,
+                    DefaultLimit = DefaultLimit,
                 };
             });
         }
