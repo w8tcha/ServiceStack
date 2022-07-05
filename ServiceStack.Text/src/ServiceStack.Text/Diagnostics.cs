@@ -1,6 +1,10 @@
 #nullable enable
 
+using System;
+using System.Collections.Generic;
+using System.Data;
 using System.Diagnostics;
+using System.Net.Sockets;
 
 namespace ServiceStack;
 
@@ -11,16 +15,29 @@ public class Diagnostics
     
     public static class Listeners
     {
-        public const string ServiceStack = nameof(ServiceStack);
+        public const string ServiceStack = "ServiceStack";
         public const string OrmLite = "ServiceStack.OrmLite";
         public const string Redis = "ServiceStack.Redis";
     }
     
     public static class Events
     {
+        public static class ServiceStack
+        {
+            private const string Prefix = Listeners.ServiceStack + ".";
+            
+            public const string WriteRequestBefore = Prefix + nameof(WriteRequestBefore);
+            public const string WriteRequestAfter = Prefix + nameof(WriteRequestAfter);
+            public const string WriteRequestError = Prefix + nameof(WriteRequestError);
+            
+            public const string WriteGatewayBefore = Prefix + nameof(WriteGatewayBefore);
+            public const string WriteGatewayAfter = Prefix + nameof(WriteGatewayAfter);
+            public const string WriteGatewayError = Prefix + nameof(WriteGatewayError);
+        }
+        
         public static class OrmLite
         {
-            private const string Prefix = "ServiceStack.OrmLite.";
+            private const string Prefix = Listeners.OrmLite + ".";
             
             public const string WriteCommandBefore = Prefix + nameof(WriteCommandBefore);
             public const string WriteCommandAfter = Prefix + nameof(WriteCommandAfter);
@@ -42,6 +59,34 @@ public class Diagnostics
             public const string WriteTransactionRollbackAfter = Prefix + nameof(WriteTransactionRollbackAfter);
             public const string WriteTransactionRollbackError = Prefix + nameof(WriteTransactionRollbackError);
         }
+        
+        public static class Redis
+        {
+            private const string Prefix = Listeners.Redis + ".";
+            
+            public const string WriteCommandBefore = Prefix + nameof(WriteCommandBefore);
+            public const string WriteCommandAfter = Prefix + nameof(WriteCommandAfter);
+            public const string WriteCommandRetry = Prefix + nameof(WriteCommandRetry);
+            public const string WriteCommandError = Prefix + nameof(WriteCommandError);
+            
+            public const string WriteConnectionOpenBefore = Prefix + nameof(WriteConnectionOpenBefore);
+            public const string WriteConnectionOpenAfter = Prefix + nameof(WriteConnectionOpenAfter);
+            public const string WriteConnectionOpenError = Prefix + nameof(WriteConnectionOpenError);
+            
+            public const string WriteConnectionCloseBefore = Prefix + nameof(WriteConnectionCloseBefore);
+            public const string WriteConnectionCloseAfter = Prefix + nameof(WriteConnectionCloseAfter);
+            public const string WriteConnectionCloseError = Prefix + nameof(WriteConnectionCloseError);
+            
+            public const string WritePoolRent = Prefix + nameof(WritePoolRent);
+            public const string WritePoolReturn = Prefix + nameof(WritePoolReturn);
+        }
+    }
+    
+    public static class Activity
+    {
+        public const string HttpBegin = nameof(HttpBegin);
+        public const string HttpEnd = nameof(HttpEnd);
+        public const string OperationId = nameof(OperationId);
     }
 
     private DiagnosticListener servicestack { get; set; } = new(Listeners.ServiceStack);
@@ -51,4 +96,49 @@ public class Diagnostics
     public static DiagnosticListener ServiceStack => Instance.servicestack;
     public static DiagnosticListener OrmLite => Instance.ormlite;
     public static DiagnosticListener Redis => Instance.redis;
+}
+
+public abstract class DiagnosticEvent
+{
+    public Guid OperationId { get; set; }
+    public string Operation { get; set; }
+    public string? TraceId { get; set; }
+    public Exception Exception { get; set; }
+    public long Timestamp { get; set; }
+    public Dictionary<string, string> Meta { get; set; }
+}
+
+public class OrmLiteDiagnosticEvent : DiagnosticEvent
+{
+    public Guid ConnectionId { get; set; }
+    public IDbConnection Connection { get; set; }
+    public IDbCommand Command { get; set; }
+    public IsolationLevel IsolationLevel { get; set; }
+    public string TransactionName { get; set; }
+}
+
+public class RedisDiagnosticEvent : DiagnosticEvent
+{
+    public byte[][] Command { get; set; }
+    /// <summary>
+    /// RedisNativeClient instance, late-bound object to decouple 
+    /// </summary>
+    public object Client { get; set; }
+    public Socket Socket { get; set; }
+    public string Host { get; set; }
+    public int Port { get; set; }
+}
+
+public static class DiagnosticsUtils
+{
+    public static string? GetTraceId(this Activity? activity)
+    {
+        if (activity == null)
+            return null;
+        while (activity.Parent != null)
+        {
+            activity = activity.Parent;
+        }
+        return activity.ParentId;
+    }
 }

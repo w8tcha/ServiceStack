@@ -96,6 +96,8 @@ namespace ServiceStack.Redis
             var oldDebugAllowSync = DebugAllowSync;
             DebugAllowSync = true;
 #endif
+            Exception e = null;
+            var id = Guid.Empty;
             try
             {
                 if (log.IsDebugEnabled)
@@ -103,7 +105,8 @@ namespace ServiceStack.Redis
                     var type = ConnectTimeout <= 0 ? "sync" : "async";
                     logDebug($"Attempting {type} connection to '{Host}:{Port}' (SEND {SendTimeout}, RECV {ReceiveTimeout} Timeouts)...");
                 }
-                
+
+                id = Diagnostics.Redis.WriteConnectionOpenBefore(this);
                 if (ConnectTimeout <= 0)
                 {
                     socket.Connect(Host, Port);
@@ -118,12 +121,14 @@ namespace ServiceStack.Redis
 
                 if (!socket.Connected)
                 {
+                    var message = $"Socket failed connect to '{Host}:{Port}' (ConnectTimeout {ConnectTimeout})";
                     if (log.IsDebugEnabled)
-                        logDebug($"Socket failed connect to '{Host}:{Port}' (ConnectTimeout {ConnectTimeout})");
+                        logDebug(message);
 
                     socket.Close();
                     socket = null;
                     DeactivatedAt = DateTime.UtcNow;
+                    e = new Exception(message);
                     return;
                 }
 
@@ -134,50 +139,12 @@ namespace ServiceStack.Redis
 
                 if (Ssl)
                 {
-                    if (Env.IsMono)
-                    {
-                        //Mono doesn't support EncryptionPolicy
-                        sslStream = new SslStream(networkStream,
-                            leaveInnerStreamOpen: false,
-                            userCertificateValidationCallback: RedisConfig.CertificateValidationCallback,
-                            userCertificateSelectionCallback: RedisConfig.CertificateSelectionCallback);
-                    }
-                    else
-                    {
-#if NETSTANDARD || NET472
-                        sslStream = new SslStream(networkStream,
-                            leaveInnerStreamOpen: false,
-                            userCertificateValidationCallback: RedisConfig.CertificateValidationCallback,
-                            userCertificateSelectionCallback: RedisConfig.CertificateSelectionCallback,
-                            encryptionPolicy: EncryptionPolicy.RequireEncryption);
-#else
-                        var ctor = typeof(SslStream).GetConstructors()
-                            .First(x => x.GetParameters().Length == 5);
+                    sslStream = new SslStream(networkStream,
+                        leaveInnerStreamOpen: false,
+                        userCertificateValidationCallback: RedisConfig.CertificateValidationCallback,
+                        userCertificateSelectionCallback: RedisConfig.CertificateSelectionCallback,
+                        encryptionPolicy: EncryptionPolicy.RequireEncryption);
 
-                        var policyType = AssemblyUtils.FindType("System.Net.Security.EncryptionPolicy");
-                        var policyValue = Enum.Parse(policyType, "RequireEncryption");
-
-                        sslStream = (SslStream)ctor.Invoke(new[] {
-                            networkStream,
-                            false,
-                            RedisConfig.CertificateValidationCallback,
-                            RedisConfig.CertificateSelectionCallback,
-                            policyValue,
-                        });
-#endif                        
-                    }
-
-#if NETSTANDARD || NET472
-                    var task = sslStream.AuthenticateAsClientAsync(Host);
-                    if (ConnectTimeout > 0)
-                    {
-                        task.Wait(ConnectTimeout);
-                    }
-                    else
-                    {
-                        task.Wait();
-                    }
-#else
                     if (SslProtocols != null)
                     {
                         sslStream.AuthenticateAsClient(Host, new X509CertificateCollection(), 
@@ -187,7 +154,6 @@ namespace ServiceStack.Redis
                     {
                         sslStream.AuthenticateAsClient(Host);
                     }
-#endif
 
                     if (!sslStream.IsEncrypted)
                         throw new Exception($"Could not establish an encrypted connection to '{Host}:{Port}'");
@@ -248,8 +214,9 @@ namespace ServiceStack.Redis
                 if (ConnectionFilter != null)
                     ConnectionFilter(this);
             }
-            catch (SocketException)
+            catch (SocketException ex)
             {
+                e = ex;
                 logError(ErrorConnect.Fmt(Host, Port));
                 throw;
             }
@@ -258,6 +225,11 @@ namespace ServiceStack.Redis
 #if DEBUG
                 DebugAllowSync = oldDebugAllowSync;
 #endif
+                
+                if (e != null)
+                    Diagnostics.Redis.WriteConnectionOpenError(id, this, e);
+                else
+                    Diagnostics.Redis.WriteConnectionOpenAfter(id, this);
             }
         }
 
@@ -574,7 +546,7 @@ namespace ServiceStack.Redis
         /// <summary>
         /// Called before returning pooled client/socket  
         /// </summary>
-        internal void Activate(bool newClient=false)
+        internal void Activate(bool newClient=false, [CallerMemberName] string operation = "")
         {
             if (!newClient)
             {
@@ -589,11 +561,13 @@ namespace ServiceStack.Redis
                 }
             }
             Active = true;
+            Diagnostics.Redis.WritePoolRent(this, operation);
         }
 
-        internal void Deactivate()
+        internal void Deactivate([CallerMemberName] string operation = "")
         {
             Active = false;
+            Diagnostics.Redis.WritePoolReturn(this, operation);
         }
 
         /// <summary>
@@ -645,7 +619,7 @@ namespace ServiceStack.Redis
         protected T SendReceive<T>(byte[][] cmdWithBinaryArgs,
             Func<T> fn,
             Action<Func<T>> completePipelineFn = null,
-            bool sendWithoutRead = false)
+            bool sendWithoutRead = false, [CallerMemberName] string operation = "")
         {
             if (Pipeline is null) AssertNotAsyncOnly();
             if (TrackThread != null)
@@ -657,6 +631,8 @@ namespace ServiceStack.Redis
             var i = 0;
             var didWriteToBuffer = false;
             Exception originalEx = null;
+            Exception wasError = null;
+            Guid id = Guid.Empty; 
 
             var firstAttempt = DateTime.UtcNow;
 
@@ -672,6 +648,7 @@ namespace ServiceStack.Redis
 
                     if (!didWriteToBuffer) //only write to buffer once
                     {
+                        id = Diagnostics.Redis.WriteCommandBefore(cmdWithBinaryArgs, operation);
                         WriteCommandToSendBuffer(cmdWithBinaryArgs);
                         didWriteToBuffer = true;
                     }
@@ -686,7 +663,13 @@ namespace ServiceStack.Redis
                             throw new NotSupportedException("Pipeline is not supported.");
 
                         completePipelineFn(fn);
-                        return default(T);
+                        return default;
+                    }
+
+                    if (i > 0)
+                    {
+                        Interlocked.Increment(ref RedisState.TotalRetrySuccess);
+                        Diagnostics.Redis.WriteCommandRetry(id, cmdWithBinaryArgs, operation);
                     }
 
                     var result = default(T);
@@ -696,18 +679,16 @@ namespace ServiceStack.Redis
                     if (Pipeline == null)
                         ResetSendBuffer();
 
-                    if (i > 0)
-                        Interlocked.Increment(ref RedisState.TotalRetrySuccess);
-
                     Interlocked.Increment(ref RedisState.TotalCommandsSent);
 
                     return result;
                 }
                 catch (Exception outerEx)
                 {
+                    wasError = outerEx;
                     if (log.IsDebugEnabled)
                         logDebug("SendReceive Exception: " + outerEx.Message);
-                    
+
                     var retryableEx = outerEx as RedisRetryableException;
                     if (retryableEx == null && outerEx is RedisException
                         || outerEx is LicenseException)
@@ -735,6 +716,14 @@ namespace ServiceStack.Redis
 
                     Interlocked.Increment(ref RedisState.TotalRetryCount);
                     TaskUtils.Sleep(GetBackOffMultiplier(++i));
+                    wasError = null;
+                }
+                finally
+                {
+                    if (wasError != null)
+                        Diagnostics.Redis.WriteCommandError(id, cmdWithBinaryArgs, originalEx ?? wasError, operation);
+                    else
+                        Diagnostics.Redis.WriteCommandAfter(id, cmdWithBinaryArgs, operation);
                 }
             }
         }

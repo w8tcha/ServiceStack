@@ -18,11 +18,10 @@ using ServiceStack.Configuration;
 using ServiceStack.IO;
 using ServiceStack.Model;
 using ServiceStack.NetCore;
-using ServiceStack.Text;
 
 namespace ServiceStack.Host.NetCore
 {
-    public class NetCoreRequest : IHttpRequest, IHasResolver, IHasVirtualFiles, IServiceProvider, IHasBufferedStream, IHasStringId
+    public class NetCoreRequest : IHttpRequest, IHasResolver, IHasVirtualFiles, IServiceProvider, IHasBufferedStream, IHasStringId, IHasTraceId
     {
         public static ILog log = LogManager.GetLogger(typeof(NetCoreRequest));
 
@@ -45,7 +44,7 @@ namespace ServiceStack.Host.NetCore
             this.RequestAttributes = attrs;
 
             //Kestrel does not decode '+' into space
-            this.PathInfo = this.OriginalPathInfo = (pathInfo ?? request.Path.Value).Replace("+", " ").Replace("%2f", "/");  
+            this.PathInfo = this.OriginalPathInfo = (pathInfo ?? request.Path.Value)?.Replace("+", " ").Replace("%2f", "/");  
             this.PathInfo = HostContext.AppHost.ResolvePathInfo(this, PathInfo);
         }
 
@@ -77,6 +76,8 @@ namespace ServiceStack.Host.NetCore
 
         public object Dto { get; set; }
         public string ContentType => request.ContentType;
+
+        public string TraceId => request.HttpContext.TraceIdentifier;
 
         public bool IsLocal
         {

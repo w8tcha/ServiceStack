@@ -159,7 +159,7 @@ namespace ServiceStack.Redis
             Func<CancellationToken, ValueTask<T>> fn,
             CancellationToken token,
             Action<Func<CancellationToken, ValueTask<T>>> completePipelineFn = null,
-            bool sendWithoutRead = false)
+            bool sendWithoutRead = false, [CallerMemberName] string operation = "")
         {
             //if (TrackThread != null)
             //{
@@ -170,6 +170,8 @@ namespace ServiceStack.Redis
             var i = 0;
             var didWriteToBuffer = false;
             Exception originalEx = null;
+            Exception wasError = null;
+            Guid id = Guid.Empty; 
 
             var firstAttempt = DateTime.UtcNow;
 
@@ -188,6 +190,7 @@ namespace ServiceStack.Redis
 
                     if (!didWriteToBuffer) //only write to buffer once
                     {
+                        id = Diagnostics.Redis.WriteCommandBefore(cmdWithBinaryArgs, operation);
                         WriteCommandToSendBuffer(cmdWithBinaryArgs);
                         didWriteToBuffer = true;
                     }
@@ -205,6 +208,12 @@ namespace ServiceStack.Redis
                         return default;
                     }
 
+                    if (i > 0)
+                    {
+                        Interlocked.Increment(ref RedisState.TotalRetrySuccess);
+                        Diagnostics.Redis.WriteCommandRetry(id, cmdWithBinaryArgs, operation);
+                    }
+
                     var result = default(T);
                     if (fn != null)
                         result = await fn(token).ConfigureAwait(false);
@@ -212,15 +221,13 @@ namespace ServiceStack.Redis
                     if (Pipeline == null)
                         ResetSendBuffer();
 
-                    if (i > 0)
-                        Interlocked.Increment(ref RedisState.TotalRetrySuccess);
-
                     Interlocked.Increment(ref RedisState.TotalCommandsSent);
 
                     return result;
                 }
                 catch (Exception outerEx)
                 {
+                    wasError = outerEx;
                     if (log.IsDebugEnabled)
                         logDebug("SendReceive Exception: " + outerEx.Message);
 
@@ -251,6 +258,14 @@ namespace ServiceStack.Redis
 
                     Interlocked.Increment(ref RedisState.TotalRetryCount);
                     await Task.Delay(GetBackOffMultiplier(++i), token).ConfigureAwait(false);
+                    wasError = null;
+                }
+                finally
+                {
+                    if (wasError != null)
+                        Diagnostics.Redis.WriteCommandError(id, cmdWithBinaryArgs, originalEx ?? wasError, operation);
+                    else
+                        Diagnostics.Redis.WriteCommandAfter(id, cmdWithBinaryArgs, operation);
                 }
             }
         }
