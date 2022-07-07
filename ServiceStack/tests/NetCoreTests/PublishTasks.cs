@@ -136,6 +136,8 @@ public class PublishTasks
                 typeof(GetValidationRules),
                 typeof(ModifyValidationRules),
                 typeof(RequestLogs),
+                typeof(AdminDashboard),
+                typeof(AdminProfiling),
             };
             
             Plugins.Add(new AuthFeature(() => new AuthUserSession(), new [] {
@@ -156,6 +158,7 @@ public class PublishTasks
             Plugins.Add(new AdminUsersFeature());
             Plugins.Add(new AutoQueryFeature());
             Plugins.Add(new RequestLogsFeature());
+            Plugins.Add(new ProfilingFeature());
         }
     }
 
