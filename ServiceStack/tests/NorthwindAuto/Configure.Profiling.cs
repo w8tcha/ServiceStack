@@ -1,3 +1,4 @@
+using Chinook.ServiceModel;
 using MyApp.ServiceInterface;
 using ServiceStack;
 using ServiceStack.Auth;
@@ -15,13 +16,13 @@ public class ConfigureProfiling : IHostingStartup
             host => {
                 host.Plugins.AddIfDebug(new RequestLogsFeature {
                     EnableResponseTracking = true,
-                    RequestLogFilter = (req, entry) => {
-                        entry.Meta = new() {
-                            ["RemoteIp"] = req.RemoteIp,
-                            ["Referrer"] = req.UrlReferrer?.ToString(),
-                            ["Language"] = req.GetHeader(HttpHeaders.AcceptLanguage),
-                        };
-                    },
+                    // RequestLogFilter = (req, entry) => {
+                    //     entry.Meta = new() {
+                    //         ["RemoteIp"] = req.RemoteIp,
+                    //         ["Referrer"] = req.UrlReferrer?.ToString(),
+                    //         ["Language"] = req.GetHeader(HttpHeaders.AcceptLanguage),
+                    //     };
+                    // },
                 });
                 
                 host.Plugins.AddIfDebug(new ProfilingFeature {

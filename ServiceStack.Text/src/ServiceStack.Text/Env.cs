@@ -47,7 +47,7 @@ namespace ServiceStack.Text
             }
             
             var platform = (int)Environment.OSVersion.Platform;
-            IsUnix = platform == 4 || platform == 6 || platform == 128;
+            IsUnix = platform is 4 or 6 or 128;
 
             if (File.Exists(@"/System/Library/CoreServices/SystemVersion.plist"))
                 IsOSX = true;
@@ -115,7 +115,7 @@ namespace ServiceStack.Text
 
         public static string VersionString { get; set; }
 
-        public static decimal ServiceStackVersion = 6.11m;
+        public static decimal ServiceStackVersion = 6.21m;
 
         public static bool IsLinux { get; set; }
 
@@ -169,9 +169,6 @@ namespace ServiceStack.Text
         {
             return __releaseDate;
         }
-
-        [Obsolete("Use ReferenceAssemblyPath")]
-        public static string ReferenceAssembyPath => ReferenceAssemblyPath; 
         
         private static string referenceAssemblyPath;
 

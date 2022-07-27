@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
 using System.Net.Sockets;
+using ServiceStack.Text;
 
 namespace ServiceStack;
 
@@ -40,6 +41,7 @@ public class Diagnostics
         public const string Response = nameof(Response);
         public const string LoggingRequestId = nameof(LoggingRequestId);
         public const string Timestamp = nameof(Timestamp);
+        public const string Date = nameof(Date);
 #if NET6_0_OR_GREATER
         public static readonly System.Net.Http.HttpRequestOptionsKey<Guid> HttpRequestOperationId = new(OperationId);
         public static readonly System.Net.Http.HttpRequestOptionsKey<object> HttpRequestRequest = new(Request);
@@ -156,6 +158,24 @@ public class Diagnostics
     public static DiagnosticListener Client => Instance.client;
     public static DiagnosticListener OrmLite => Instance.ormlite;
     public static DiagnosticListener Redis => Instance.redis;
+    
+    public static string? CreateStackTrace(Exception? e)
+    {
+        if (e?.StackTrace == null)
+            return null;
+
+        var sb = StringBuilderCache.Allocate();
+        sb.AppendLine(e.StackTrace);
+            
+        var innerEx = e.InnerException;
+        while (innerEx != null)
+        {
+            sb.AppendLine("");
+            sb.AppendLine(innerEx.ToString());
+            innerEx = innerEx.InnerException;
+        }
+        return StringBuilderCache.ReturnAndFree(sb);
+    }
 }
 
 [Flags]
@@ -179,6 +199,7 @@ public abstract class DiagnosticEvent
     public string? UserAuthId { get; set; }
     public Exception? Exception { get; set; }
     public long Timestamp { get; set; }
+    public DateTime Date { get; set; }
     public object DiagnosticEntry { get; set; }
     public string? Tag { get; set; }
     public string? StackTrace { get; set; }
@@ -239,6 +260,7 @@ public static class DiagnosticsUtils
             evt.Tag ??= rootActivity.GetTag();
         }
         evt.Timestamp = Stopwatch.GetTimestamp();
+        evt.Date = DateTime.UtcNow;
         return evt;
     }
 }

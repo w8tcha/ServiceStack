@@ -61,7 +61,7 @@ As an example here's what YouTube content placeholders mimicking the page layout
 But we can do even better than an inert content placeholder, and load a temporary chrome of our App. But as this needs to be done
 before Blazor has loaded we need to implement this with a sprinkling of HTML + JS.
 
-Essentialy we need to the Chrome and navigation of our App from the
+Essentially we need to copy the Chrome and navigation of our App from the
 [Header](https://github.com/NetCoreTemplates/blazor-tailwind/blob/main/MyApp.Client/Shared/Header.razor),
 [Sidebar](https://github.com/NetCoreTemplates/blazor-tailwind/blob/main/MyApp.Client/Shared/Sidebar.razor) and
 [MainLayout](https://github.com/NetCoreTemplates/blazor-tailwind/blob/main/MyApp.Client/Shared/MainLayout.razor) 
@@ -90,7 +90,7 @@ After which we end up with HTML similar to the structure below:
                 </ul>
             </nav>
         </header>
-        <!-- <Siderbar/> Off-canvas menu for mobile, show/hide based on off-canvas menu state. -->
+        <!-- <Sidebar> Off-canvas menu for mobile, show/hide based on off-canvas menu state. -->
         <div class="mobile relative z-40 md:hidden" role="dialog" aria-modal="true">
             ...
             <nav class="mt-5 px-2 space-y-1">

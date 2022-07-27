@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using ServiceStack.Admin;
 using ServiceStack.Configuration;
 using ServiceStack.Logging;
+using ServiceStack.Model;
 using ServiceStack.NativeTypes;
 using ServiceStack.Web;
 
@@ -97,7 +98,20 @@ public class ProfilingFeature : IPlugin, Model.IHasStringId, IPreInitPlugin
     public string Id => Plugins.Profiling;
     public const int DefaultCapacity = 10000;
 
+    /// <summary>
+    /// Limit API access to users in role
+    /// </summary>
     public string AccessRole { get; set; } = RoleNames.Admin;
+
+    /// <summary>
+    /// Which features to Profile, default all
+    /// </summary>
+    public ProfileSource Profile { get; set; } = ProfileSource.All;
+
+    /// <summary>
+    /// Size of circular buffer of profiled events
+    /// </summary>
+    public int Capacity { get; set; } = DefaultCapacity;
 
     /// <summary>
     /// Don't log requests of these types. By default Profiling/Metadata requests are excluded
@@ -129,28 +143,11 @@ public class ProfilingFeature : IPlugin, Model.IHasStringId, IPreInitPlugin
     /// Turn On/Off Tracking of Responses per-request
     /// </summary>
     public Func<IRequest, bool>? ResponseTrackingFilter { get; set; }
-
-    /// <summary>
-    /// Which features to Profile, default all
-    /// </summary>
-    public ProfileSource Profile { get; set; } = ProfileSource.All;
     
     /// <summary>
     /// Whether to include CallStack StackTrace 
     /// </summary>
     public bool? IncludeStackTrace { get; set; }
-
-    /// <summary>
-    /// Size of circular buffer of profiled events
-    /// </summary>
-    public int Capacity { get; set; } = DefaultCapacity;
-    
-    /// <summary>
-    /// Default take, if none is specified
-    /// </summary>
-    public int DefaultLimit { get; set; } = 50;
-    
-    public List<string> SummaryFields { get; set; }
 
     /// <summary>
     /// Attach custom data to request profiling summary fields
@@ -162,16 +159,28 @@ public class ProfilingFeature : IPlugin, Model.IHasStringId, IPreInitPlugin
     public string? TagLabel { get; set; }
     
     /// <summary>
+    /// The properties displayed in Profiling UI results grid
+    /// </summary>
+    public List<string> SummaryFields { get; set; }
+    
+    /// <summary>
+    /// Default take, if none is specified
+    /// </summary>
+    public int DefaultLimit { get; set; } = 50;
+    
+    /// <summary>
     /// Customize DiagnosticEntry that gets captured
     /// </summary>
     public Action<DiagnosticEntry, DiagnosticEvent>? DiagnosticEntryFilter { get; set; }
-
-    public ProfilerDiagnosticObserver Observer { get; set; }
 
     /// <summary>
     /// Maximum char/byte length of string response body
     /// </summary>
     public int MaxBodyLength { get; set; } = 10 * 10 * 1024;
+
+    protected internal ProfilerDiagnosticObserver Observer { get; set; }
+    protected internal long startTick = Stopwatch.GetTimestamp();
+    protected internal DateTime startDateTime = DateTime.UtcNow;
 
     public ProfilingFeature()
     {
@@ -214,7 +223,7 @@ public class ProfilingFeature : IPlugin, Model.IHasStringId, IPreInitPlugin
             nameof(DiagnosticEntry.ThreadId),
             nameof(DiagnosticEntry.UserAuthId),
             nameof(DiagnosticEntry.Duration),
-            nameof(DiagnosticEntry.Timestamp),
+            nameof(DiagnosticEntry.Date),
         };
     }
 
@@ -362,21 +371,11 @@ public sealed class ProfilerDiagnosticObserver :
             UserAuthId = e.UserAuthId,
             Tag = e.Tag,
             Timestamp = e.Timestamp,
+            Date = e.Date,
             ThreadId = Thread.CurrentThread.ManagedThreadId,
-            StackTrace = e.StackTrace,
             OperationId = e.OperationId,
         };
-        if (e.Exception != null)
-        {
-            to.StackTrace ??= e.Exception.StackTrace;
-            if (to.Error?.StackTrace != null)
-                to.Error.StackTrace = null;
-        }
-
-        if (e.Exception != null)
-        {
-            to.Error = DtoUtils.CreateResponseStatus(e.Exception, request:null, debugMode:true);
-        }
+        SetException(to, e.Exception);
 
         if (orig != null)
         {
@@ -384,6 +383,18 @@ public sealed class ProfilerDiagnosticObserver :
         }
 
         return to;
+    }
+
+    public static void SetException(DiagnosticEntry to, Exception? ex)
+    {
+        if (ex != null)
+            to.StackTrace ??= Diagnostics.CreateStackTrace(ex);
+
+        if (ex != null)
+            to.Error = DtoUtils.CreateResponseStatus(ex, request: null, debugMode: true);
+
+        if (to.StackTrace != null && to.Error?.StackTrace != null && ex is not IResponseStatusConvertible)
+            to.Error.StackTrace = null;
     }
 
     public DiagnosticEntry Filter(DiagnosticEntry entry, DiagnosticEvent e)
@@ -472,7 +483,7 @@ public sealed class ProfilerDiagnosticObserver :
 
     bool ShouldTrack(RequestDiagnosticEvent e)
     {
-        if (feature.ExcludeRequestPathInfoStartingWith.Any(x => e.Request.PathInfo.StartsWith(x)))
+        if (feature.ExcludeRequestPathInfoStartingWith.Any(x => e.Request.PathInfo?.StartsWith(x) == true))
             return false;
         
         var requestType = e.Request.Dto?.GetType();
@@ -834,6 +845,7 @@ public sealed class ProfilerDiagnosticObserver :
                     HttpRequest = httpReq,
                 }.Init(Activity.Current);
                 entry.Timestamp = timestamp;
+                entry.Date = feature.startDateTime + TimeSpan.FromTicks(timestamp - feature.startTick);
                 entry.ClientOperationId = httpReq.Options.TryGetValue(Diagnostics.Keys.HttpRequestOperationId, out var operationId)
                         ? operationId
                         : null;
@@ -867,10 +879,13 @@ public sealed class ProfilerDiagnosticObserver :
                     OperationId = loggingRequestId,
                     HttpResponse = httpRes,
                     Exception = (int)httpRes.StatusCode >= 400
-                        ? new HttpError(httpRes.StatusCode, httpRes.ReasonPhrase)
+                        ? new HttpError(httpRes.StatusCode, httpRes.ReasonPhrase) {
+                            StackTrace = Diagnostics.IncludeStackTrace ? Environment.StackTrace : null,
+                        }
                         : null,
                 }.Init(Activity.Current);
                 entry.Timestamp = timestamp;
+                entry.Date = feature.startDateTime + TimeSpan.FromTicks(timestamp - feature.startTick);
 
                 // JsonApiClient
                 if (refs.TryRemove(loggingRequestId, out var orig) && orig is HttpClientDiagnosticEvent reqOrig)
@@ -917,7 +932,10 @@ public sealed class ProfilerDiagnosticObserver :
             {
                 httpAfter.Exception = clientError.Exception;
                 if (httpAfter.DiagnosticEntry is DiagnosticEntry entry)
-                    entry.Error = DtoUtils.CreateResponseStatus(clientError.Exception, request:null, debugMode:true);
+                {
+                    entry.StackTrace = null; // Clear low quality HttpClient Error
+                    SetException(entry, clientError.Exception);
+                }
             }
         }
 #endif
@@ -1174,6 +1192,7 @@ public class DiagnosticEntry
     public Dictionary<string, object?>? NamedArgs { get; set; }
     public TimeSpan? Duration { get; set; }
     public long Timestamp { get; set; }
+    public DateTime Date { get; set; }
     /// <summary>
     /// Custom data that can be attached with ProfilingFeature.TagResolver  
     /// </summary>
