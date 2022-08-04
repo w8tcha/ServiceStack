@@ -37,7 +37,7 @@
             </header>
 
             <!-- <Sidebar> Off-canvas menu for mobile, show/hide based on off-canvas menu state. -->
-            <div class="mobile relative z-40 md:hidden" role="dialog" aria-modal="true">
+            <div class="mobile relative z-40 hidden" role="dialog" aria-modal="true">
                 <div class="fixed inset-0 bg-gray-600 bg-opacity-75"></div>
                 <div class="fixed inset-0 flex z-40">
                     <div class="relative flex-1 flex flex-col max-w-xs w-full bg-white">
@@ -152,7 +152,7 @@ before Blazor has loaded we need to implement this with a sprinkling of HTML + J
 <a href="https://github.com/NetCoreTemplates/blazor-tailwind/blob/main/MyApp.Client/Shared/MainLayout.razor">MainLayout</a>
 and paste it into
 <a href="https://github.com/NetCoreTemplates/blazor-tailwind/blob/main/MyApp.Client/wwwroot/index.html">/wwwroot/index.html</a>
-where anything between <code>&lt;div id=&quot;app&quot;&gt;&lt;/div&gt;</code> which is displayed whilst our Blazor App is loading, before it's replaced with the real App.</p>
+where anything between <code>&lt;div id=&quot;app&quot;&gt;&lt;/div&gt;</code> is displayed whilst our Blazor App is loading, before it's replaced with the real C# rendered App.</p>
 <p>After which we end up with HTML similar to the structure below:</p>
 <pre><code class="language-html">&lt;div id=&quot;app&quot;&gt;
     &lt;!-- loading: render temp static app chrome to improve perceived performance --&gt;
@@ -173,7 +173,7 @@ where anything between <code>&lt;div id=&quot;app&quot;&gt;&lt;/div&gt;</code> w
             &lt;/nav&gt;
         &lt;/header&gt;
         &lt;!-- &lt;Sidebar&gt; Off-canvas menu for mobile, show/hide based on off-canvas menu state. --&gt;
-        &lt;div class=&quot;mobile relative z-40 md:hidden&quot; role=&quot;dialog&quot; aria-modal=&quot;true&quot;&gt;
+        &lt;div class=&quot;mobile relative z-40 hidden&quot; role=&quot;dialog&quot; aria-modal=&quot;true&quot;&gt;
             ...
             &lt;nav class=&quot;mt-5 px-2 space-y-1&quot;&gt;
             &lt;/nav&gt;
@@ -249,16 +249,15 @@ $1('#app-loading .desktop nav').innerHTML = renderNav(SIDEBAR, (label, route, ic
 <p>Which takes care of both rendering the top and sidebar menus as well as highlighting the active menu for the active
 nav item being loaded, and because we're rendering our real App navigation with real links, users will be able to navigate
 to the page they want before our App has loaded.</p>
-<p>To minimize maintenance efforts our Blazor App also makes use of the <code>TOP</code> and <code>SIDEBAR</code> items to render its Navigation Menus, which it
-renders with C#.</p>
+<p>To minimize maintenance efforts the C# Blazor App also uses the navigation defined in <code>TOP</code> and <code>SIDEBAR</code> to render its Navigation Menus.</p>
 <p>With just this, every page now benefits from an instant App chrome to give the perception that our App has loaded instantly
 before any C# in our Blazor App is run. E.g. here's what the <a href="/counter">Blazor Counter</a> page looks like while it's loading:</p>
 <p><img src="https://raw.githubusercontent.com/ServiceStack/docs/master/docs/images/jamstack/blazor-tailwind/loading.png" alt="" /></p>
 <p>If you click refresh the <a href="/counter">/counter</a> page a few times you'll see the new loading screen prior to the Counter page being available.</p>
 <p>Our App is now in a pretty shippable state with decent UX of a loading page that looks like it loaded instantly instead
 of the &quot;under construction&quot; Loading... page from the default Blazor WASM project template.</p>
-<p>It's not quite a zero maintenance solution but still fairly low maintenance as only the <code>SIDEBAR</code> and <code>TOP</code> csv lists
-need updating when add/removing menu items.</p>
+<p>It's a fairly low maintenance solution with the primary concession being the App's main navigation menus are defined in
+<code>SIDEBAR</code> and <code>TOP</code> csv lists so it maintains a single source of truth for both C# and JS generated UIs.</p>
 <h3 id="improving-ux-with-prerendering-1">Improving UX with Prerendering</h3>
 <p>We'll now turn our focus to the most important page in our App, the <a href="/">Home Page</a> which is the page most people will see
 when loading the App from the first time.</p>
@@ -421,9 +420,7 @@ the alternate layout with an <code>Authenticating...</code> text that will appea
 &lt;/AuthorizeRouteView&gt;
 </code></pre>
 <p>This last change brings us to the optimal UX we have now with the home page loading instantly whilst our Blazor App
-is loading in the background that'll eventually replace the home page with its identical looking C# version except
-for the <strong>box-shadow under the top navigation</strong> so you can tell when you're looking at the pre-rendered version
-instead of the C# Blazor version.</p>
+is loading in the background that'll eventually replace the home page with its identical looking C# version.</p>
 <h3 id="prerendering-markdown-content">Prerendering Markdown Content</h3>
 <p>The other pages that would greatly benefit from prerendering are the Markdown <code>/docs/*</code> pages (like this one) that's implemented in
 <a href="https://github.com/NetCoreTemplates/blazor-tailwind/blob/main/MyApp.Client/Pages/Docs.razor">Docs.razor</a>.</p>

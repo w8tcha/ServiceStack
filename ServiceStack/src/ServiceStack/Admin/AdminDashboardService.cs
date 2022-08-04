@@ -1,9 +1,11 @@
 using System.Collections.Generic;
+using ServiceStack.DataAnnotations;
 using ServiceStack.Messaging;
 using ServiceStack.Redis;
 
-namespace ServiceStack;
+namespace ServiceStack.Admin;
 
+[ExcludeMetadata, Tag("admin")]
 public class AdminDashboard : IReturn<AdminDashboardResponse> {}
 public class AdminDashboardResponse : IHasResponseStatus
 {
@@ -19,10 +21,8 @@ public class ServerStats
     public Dictionary<string, long> MqWorkers { get; set; }
 }
 
-
 [DefaultRequest(typeof(AdminDashboard))]
-[Restrict(VisibilityTo = RequestAttributes.Localhost)]
-public class AdminDashboardServices : Service
+public class AdminDashboardService : Service
 {
     public object Any(AdminDashboard request)
     {
@@ -42,7 +42,7 @@ public class AdminDashboardServices : Service
     }
 }
 
-public static class AdminStatsUtils
+public static class AdminDashboardUtils
 {
     public static Dictionary<string, long> ToDictionary(this IMessageHandlerStats stats)
     {

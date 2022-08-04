@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ServiceStack.Configuration;
 using ServiceStack.Text;
+using ServiceStack.Web;
 
 namespace ServiceStack.Auth
 {
@@ -125,20 +127,28 @@ namespace ServiceStack.Auth
             return obj;
         }
 
-        public override void LoadUserOAuthProvider(IAuthSession authSession, IAuthTokens tokens)
+        public override async Task<IHttpResult> OnAuthenticatedAsync(IServiceBase authService, IAuthSession session,
+            IAuthTokens tokens, Dictionary<string, string> authInfo,
+            CancellationToken token = default)
         {
-            if (!(authSession is AuthUserSession userSession))
-                return;
+            var result = await base.OnAuthenticatedAsync(authService, session, tokens, authInfo, token);
             
-            base.LoadUserOAuthProvider(authSession, tokens);
-            
-            // if the id_token has been returned populate any roles
-            var idTokens  = JwtAuthProviderReader.ExtractPayload(tokens.Items["id_token"]);
-            if(idTokens.ContainsKey("roles"))
+            return result;
+        }
+
+        public override async Task LoadUserOAuthProviderAsync(IAuthSession authSession, IAuthTokens tokens)
+        {
+            if (authSession is AuthUserSession userSession)
             {
-                authSession.Roles ??= new List<string>();
-                var roles = (idTokens["roles"] as List<object>).ConvertTo<List<string>>();
-                authSession.Roles.AddRange(roles);
+                await base.LoadUserOAuthProviderAsync(authSession, tokens).ConfigAwait();
+
+                // if the id_token has been returned populate any roles
+                var idTokens = JwtAuthProviderReader.ExtractPayload(tokens.Items["id_token"]);
+                if (idTokens.ContainsKey("roles"))
+                {
+                    var roles = (idTokens["roles"] as List<object>).ConvertTo<List<string>>();
+                    tokens.AddRoles(roles);
+                }
             }
         }
     }
