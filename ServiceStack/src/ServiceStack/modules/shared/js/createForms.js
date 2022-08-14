@@ -94,10 +94,14 @@ function createForms(Meta, css, ui) {
      * @return {MetadataPropertyType|null} */
     function getPrimaryKey(type) {
         if (!type) return null
-        let typeProps = typeProperties(type)
-        let id = typeProps.find(x => x.name.toLowerCase() === 'id')
+        return getPrimaryKeyByProps(typeProperties(type)) 
+    }
+    /** @param {MetadataPropertyType[]} type
+     * @return {MetadataPropertyType|null} */
+    function getPrimaryKeyByProps(props) {
+        let id = props.find(x => x.name.toLowerCase() === 'id')
         if (id && id.isPrimaryKey) return id
-        let pk = typeProps.find(x => x.isPrimaryKey)
+        let pk = props.find(x => x.isPrimaryKey)
         let ret = pk || id
         if (!ret) {
             let crudType = crudModel(type)
@@ -105,7 +109,7 @@ function createForms(Meta, css, ui) {
                 return getPrimaryKey(getType({ name: crudType }))
             }
             console.error(`Primary Key not found in ${type.name}`)
-        } 
+        }
         return ret || null
     }
     /** @param {MetadataType} type 
@@ -371,6 +375,24 @@ function createForms(Meta, css, ui) {
         }
         return propState
     }
+    let typeofNet = o =>
+        typeof o == 'string'
+            ? 'String'
+            :  typeof o == 'boolean'
+                ? "Boolean"
+                : typeof o === 'number'
+                    ? isFinite(o) && Math.floor(o) === o
+                        ? 'Int64'
+                        : 'Double'
+                    : isDate(o)
+                        ? 'DateTime'
+                        : Array.isArray(o)
+                            ? 'List<object>'
+                            : o.constructor && o.constructor.name === 'Object'
+                                ? 'Dictionary<String,Object>'
+                                : 'Object'
+    let ValueTypes = 'String,Boolean,Int64,Double,DateTime'.split(',')
+    let isValueType = o => ValueTypes.indexOf(typeofNet(o)) >= 0
     /** @param {*} o
      *  @param {MetadataPropertyType} prop */
     function format(o, prop) {
@@ -421,6 +443,7 @@ function createForms(Meta, css, ui) {
         colClass,
         inputProp,
         getPrimaryKey,
+        getPrimaryKeyByProps,
         typeProperties,
         relativeTime,
         relativeTimeFromMs,
@@ -624,6 +647,8 @@ function createForms(Meta, css, ui) {
             return o
         },
         format,
+        typeofNet,
+        isValueType,
     }
 }
 /**
