@@ -129,14 +129,24 @@ public class AdminDatabaseService : Service
                 nameof(AdminDatabase.Take),
                 nameof(AdminDatabase.OrderBy),
                 nameof(AdminDatabase.Include),
+                nameof(AdminDatabase.Fields)
             };
         }
     }
 
     private static char[] Delims = { '=', '!', '<', '>', '[', ']' }; 
     
+    private async Task<AdminDatabaseFeature> AssertRequiredRole()
+    {
+        var feature = AssertPlugin<AdminDatabaseFeature>();
+        await RequiredRoleAttribute.AssertRequiredRoleAsync(Request, feature.AdminRole);
+        return feature;
+    }
+    
     public async Task<object> Any(AdminDatabase request)
     {
+        var feature = await AssertRequiredRole();
+        
         using var db = HostContext.AppHost.GetDbConnection(request.Db is null or "main" ? null : request.Db);
         var dialect = db.GetDialectProvider();
 
@@ -156,7 +166,7 @@ public class AdminDatabaseService : Service
         foreach (var entry in qs)
         {
             string? op = null;
-            var name = entry.Key;
+            var name = entry.Key.SqlVerifyFragment();
             var value = entry.Value.SqlVerifyFragment();
 
             if (Array.IndexOf(Delims, entry.Key[0]) >= 0)
@@ -212,6 +222,7 @@ public class AdminDatabaseService : Service
                 op = "[]";
             }
 
+            name = name.SafeVarName();
             var quotedName = dialect.GetQuotedColumnName(name);
             var paramName = $"@p{i++}";
             if (value == "null")
@@ -252,7 +263,6 @@ public class AdminDatabaseService : Service
             sb.AppendLine($"ORDER BY {OrmLiteUtils.OrderByFields(dialect, request.OrderBy)}");
         }
 
-        var feature = AssertPlugin<AdminDatabaseFeature>();
         var take = Math.Min(request.Take.GetValueOrDefault(feature.QueryLimit), feature.QueryLimit);
 
         var sql = StringBuilderCache.ReturnAndFree(sb);
