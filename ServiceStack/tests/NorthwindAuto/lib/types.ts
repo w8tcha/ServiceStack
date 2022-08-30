@@ -1,7 +1,7 @@
 import { ApiResult } from './client';
 
 /* Options:
-Date: 2022-08-13 01:21:18
+Date: 2022-08-27 18:34:20
 Version: 6.21
 Tip: To override a DTO option, remove "//" prefix before updating
 BaseUrl: http://localhost:20000
@@ -173,6 +173,7 @@ export class CrudEvent
     public requestType: string;
 
     // @DataMember(Order=8)
+    // @StringLength(2147483647)
     public requestBody: string;
 
     // @DataMember(Order=9)
@@ -197,6 +198,18 @@ export class CrudEvent
     public meta: { [index: string]: string; };
 
     public constructor(init?: Partial<CrudEvent>) { (Object as any).assign(this, init); }
+}
+
+export class RedisEndpointInfo
+{
+    public host: string;
+    public port: number;
+    public ssl?: boolean;
+    public db: number;
+    public username: string;
+    public password: string;
+
+    public constructor(init?: Partial<RedisEndpointInfo>) { (Object as any).assign(this, init); }
 }
 
 export class AppInfo
@@ -666,6 +679,8 @@ export class AdminRedisInfo
 {
     public queryLimit: number;
     public databases: number[];
+    public modifiableConnection?: boolean;
+    public endpoint: RedisEndpointInfo;
     public meta: { [index: string]: string; };
 
     public constructor(init?: Partial<AdminRedisInfo>) { (Object as any).assign(this, init); }
@@ -1171,6 +1186,7 @@ export class AdminRedisResponse
     public db: number;
     public searchResults: RedisSearchResult[];
     public info: { [index: string]: string; };
+    public endpoint: RedisEndpointInfo;
     public result: RedisText;
     public responseStatus: ResponseStatus;
 
@@ -1582,6 +1598,7 @@ export class AdminRedis implements IReturn<AdminRedisResponse>, IPost
 {
     public db?: number;
     public query: string;
+    public reconnect: RedisEndpointInfo;
     public take?: number;
     public position?: number;
     public args: string[];

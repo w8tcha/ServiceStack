@@ -99,6 +99,11 @@ namespace ServiceStack
         /// </summary>
         public static bool IsReady() => Instance?.ReadyAt != null;
 
+        /// <summary>
+        /// Sharp App Name
+        /// </summary>
+        public string AppName { get; set; }
+
         protected ServiceStackHost(string serviceName, params Assembly[] assembliesWithServices)
         {
             this.StartedAt = DateTime.UtcNow;
@@ -1960,6 +1965,8 @@ namespace ServiceStack
 
             return null;
         }
+
+        public virtual void OnApplicationStarted() {}
 
         public virtual void OnApplicationStopping()
         {
