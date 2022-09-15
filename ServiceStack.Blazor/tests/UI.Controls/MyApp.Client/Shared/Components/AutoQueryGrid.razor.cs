@@ -1,20 +1,18 @@
 ﻿using Microsoft.AspNetCore.Components;
 using ServiceStack;
-using ServiceStack.DataAnnotations;
 using ServiceStack.Text;
 using ServiceStack.Blazor;
-using System.Runtime.Serialization;
-using System.Xml.Linq;
-using System.Linq;
+using Microsoft.JSInterop;
 
 namespace MyApp.Client.Components;
 
-public class AutoQueryGridBase<Model> : AppAuthComponentBase
+public class AutoQueryGridBase<Model> : AuthBlazorComponentBase
 {
     public DataGridBase<Model>? DataGrid = default!;
     public string CacheKey => $"{Id}/{nameof(ApiPrefs)}/{typeof(Model).Name}";
     [Inject] public LocalStorage LocalStorage { get; set; }
     [Inject] public NavigationManager NavigationManager { get; set; }
+    [Inject] public IJSRuntime JS { get; set; }
 
     [Parameter] public string Id { get; set; } = "AutoQueryGrid";
     [Parameter] public RenderFragment ChildContent { get; set; }
@@ -22,6 +20,11 @@ public class AutoQueryGridBase<Model> : AppAuthComponentBase
     [CascadingParameter] public AppMetadata? AppMetadata { get; set; }
     [Parameter] public bool AllowSelection { get; set; }
     [Parameter] public bool AllowFiltering { get; set; }
+
+    [Parameter] public bool AllowCreate { get; set; }
+    [Parameter] public bool AllowUpdate { get; set; }
+    [Parameter] public bool AllowDelete { get; set; }
+
     public List<AutoQueryConvention> FilterDefinitions { get; set; } = ComponentConfig.DefaultFilters;
     [Parameter] public Apis? Apis { get; set; }
 
@@ -35,12 +38,17 @@ public class AutoQueryGridBase<Model> : AppAuthComponentBase
     [Parameter] public bool ShowResetPreferences { get; set; } = true;
     [Parameter] public bool ShowFiltersView { get; set; } = true;
     [Parameter] public List<Model> Items { get; set; } = new();
+    [Parameter] public RenderFragment? CreateForm { get; set; }
+    [Parameter] public RenderFragment? EditForm { get; set; }
+    [Parameter] public Predicate<string>? DisableKeyBindings { get; set; }
+
     public List<Model> Results => Api?.Response?.Results ?? TypeConstants<Model>.EmptyList;
     public int Total => Api?.Response?.Total ?? Results.Count;
 
     public string ToolbarButtonClass { get; set; } = CssUtils.Tailwind.ToolbarButtonClass;
 
     protected ApiResult<QueryResponse<Model>>? Api { get; set; }
+    protected ApiResult<QueryResponse<Model>>? EditApi { get; set; }
 
     protected bool apiLoading => Api?.IsLoading == true;
     protected string? errorSummary => Api?.Error.SummaryMessage();
@@ -50,8 +58,37 @@ public class AutoQueryGridBase<Model> : AppAuthComponentBase
         Filters
     }
 
-    protected async Task downloadCsv() { }
-    protected async Task copyApiUrl() { }
+    protected async Task downloadCsv() 
+    {
+        var apiUrl = CreateApiUrl("json");
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", apiUrl);
+        NavigationManager.NavigateTo(apiUrl);
+    }
+
+    protected bool copiedApiUrl;
+
+    protected async Task copyApiUrl()
+    {
+        var apiUrl = CreateApiUrl("json");
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", apiUrl);
+        copiedApiUrl = true;
+        StateHasChanged();
+        await Task.Delay(3000);
+        copiedApiUrl = false;
+        StateHasChanged();
+    }
+
+    public string CreateApiUrl(string ext = "json")
+    {
+        var args = CreateRequestArgs();
+        var url = args.ToUrl(ServiceStack.HttpMethods.Get, UrlExtensions.ToApiUrl);
+        var absoluteUrl = Client!.BaseUri.CombineWith(url.AddQueryParam("jsconfig", "edv"));
+        var formatUrl = absoluteUrl.IndexOf('?') >= 0
+            ? absoluteUrl.LeftPart('?') + "." + ext + "?" + absoluteUrl.RightPart('?')
+            : absoluteUrl + ".json";
+        return formatUrl;
+    }
+
     protected async Task clearPrefs() 
     {
         foreach (var c in GetColumns())
@@ -91,18 +128,39 @@ public class AutoQueryGridBase<Model> : AppAuthComponentBase
 
     protected bool ShowQueryPrefs;
 
-    protected string? invalidAccess => null;
-    protected string? invalidCreateAccess => null;
-    protected string? invalidUpdateAccess => null;
+    protected MetadataOperationType? FindOp(string name) => X.Map(name, name =>
+        appMetadataApi.Response?.Api.Operations.FirstOrDefault(x => x.Request.Name == name));
 
-    [Parameter]
-    [SupplyParameterFromQuery] public int Skip { get; set; } = 0;
+    protected MetadataOperationType QueryOp => X.Map(Apis!.Query ?? Apis.QueryInto, type => FindOp(type.Name))!;
+    protected MetadataOperationType? CreateOp => X.Map(Apis!.Create, type => FindOp(type.Name))!;
+    protected MetadataOperationType? UpdateOp => X.Map(Apis!.Patch ?? Apis.Update, type => FindOp(type.Name))!;
+    protected MetadataOperationType? DeleteOp => X.Map(Apis!.Delete, type => FindOp(type.Name))!;
+
+    protected string? invalidAccess => QueryOp != null ? base.InvalidAccessMessage(QueryOp) : null;
+    protected string? invalidCreateAccess => CreateOp != null ? base.InvalidAccessMessage(CreateOp) : null;
+    protected string? invalidUpdateAccess => UpdateOp != null ? base.InvalidAccessMessage(UpdateOp) : null;
+
+    protected bool CanCreate => AllowCreate && CreateOp != null && CanAccess(CreateOp);
+    protected bool CanUpdate => AllowUpdate && UpdateOp != null && CanAccess(UpdateOp);
+    protected bool CanDelete => AllowDelete && DeleteOp != null && CanAccess(DeleteOp);
+
+    [Parameter, SupplyParameterFromQuery] public int Skip { get; set; } = 0;
+    [Parameter, SupplyParameterFromQuery] public bool? New { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? Edit { get; set; }
+
     public int Take => ApiPrefs.Take;
 
     protected bool canFirst => Skip > 0;
     protected bool canPrev => Skip > 0;
     protected bool canNext => Results.Count >= Take;
     protected bool canLast => Results.Count >= Take;
+
+    class QueryParams
+    {
+        public const string Skip = "skip";
+        public const string Edit = "edit";
+        public const string New = "new";
+    }
 
     protected async Task skipTo(int value)
     {
@@ -114,10 +172,33 @@ public class AutoQueryGridBase<Model> : AppAuthComponentBase
         if (Skip > lastPage)
             Skip = (int)lastPage;
 
-        string uri = NavigationManager.Uri.SetQueryParam("skip", Skip > 0 ? $"{Skip}" : null);
+        string uri = NavigationManager.Uri.SetQueryParam(QueryParams.Skip, Skip > 0 ? $"{Skip}" : null);
         log($"skipTo ({value}) {uri}");
-        
         NavigationManager.NavigateTo(uri);
+    }
+
+    protected void OnRowSelected(Model row)
+    {
+        var id = Properties.GetId(row);
+        if (id == null) return;
+        var idStr = id.ConvertTo<string>();
+        string uri = NavigationManager.Uri.SetQueryParam(QueryParams.Edit, idStr);
+        NavigationManager.NavigateTo(uri);
+    }
+
+    protected Model? EditModel { get; set; }
+
+    protected void OnEditDone()
+    {
+        EditModel = default;
+        string uri = NavigationManager.Uri.SetQueryParam(QueryParams.Edit, null);
+        NavigationManager.NavigateTo(uri);
+    }
+
+    protected async Task OnEditSave(Model model)
+    {
+        lastQuery = null;
+        OnEditDone();
     }
 
     protected bool hasPrefs => GetColumns().Any(c => c.Filters.Count > 0 || c.Settings.SortOrder != null)
@@ -125,14 +206,19 @@ public class AutoQueryGridBase<Model> : AppAuthComponentBase
 
     string? lastQuery = null;
 
-    string? primaryKeyField;
-    protected string PrimaryKeyField => primaryKeyField ??= Properties.First(c => c.IsPrimaryKey == true).Name;
+    MetadataPropertyType PrimaryKey => Properties.GetPrimaryKey()!;
 
-    protected async Task UpdateAsync()
+    string? primaryKeyName;
+    protected string PrimaryKeyName => primaryKeyName ??= PrimaryKey.Name;
+
+    public QueryBase CreateRequestArgs() => CreateRequestArgs(out _);
+
+    
+    public QueryBase CreateRequestArgs(out string queryString)
     {
         // PK always needed
-        var selectFields = ApiPrefs.SelectedColumns.Count > 0 && !ApiPrefs.SelectedColumns.Contains(PrimaryKeyField)
-            ? new List<string>(ApiPrefs.SelectedColumns) { PrimaryKeyField }
+        var selectFields = ApiPrefs.SelectedColumns.Count > 0 && !ApiPrefs.SelectedColumns.Contains(PrimaryKeyName)
+            ? new List<string>(ApiPrefs.SelectedColumns) { PrimaryKeyName }
             : ApiPrefs.SelectedColumns;
 
         var selectedColumns = ApiPrefs.SelectedColumns.Count == 0
@@ -160,11 +246,8 @@ public class AutoQueryGridBase<Model> : AppAuthComponentBase
         var strFilters = StringBuilderCache.ReturnAndFree(sb);
         strFilters.TrimEnd('&');
 
-        var newQuery = $"?skip={Skip}&take={Take}&fields={fields}&orderBy={orderBy}&{strFilters}";
-        if (lastQuery == newQuery)
-            return;
-        lastQuery = newQuery;
-        
+        queryString = $"?skip={Skip}&take={Take}&fields={fields}&orderBy={orderBy}&{strFilters}";
+
         var request = Apis!.QueryRequest<Model>();
         request.Skip = Skip;
         request.Take = Take;
@@ -177,10 +260,20 @@ public class AutoQueryGridBase<Model> : AppAuthComponentBase
         if (!string.IsNullOrEmpty(orderBy))
             request.OrderBy = orderBy;
 
+        return request;
+    }
+
+    protected async Task UpdateAsync()
+    {
+        var request = CreateRequestArgs(out var newQuery);
+        if (lastQuery == newQuery)
+            return;
+        lastQuery = newQuery;
+
         var requestWithReturn = (IReturn<QueryResponse<Model>>)request;
         Api = await ApiAsync(requestWithReturn);
 
-        log($"UpdateAsync: {request.GetType().Name}{newQuery}, Succeeded: {Api.Succeeded}, Results: {Api.Response?.Results?.Count ?? 0}");
+        log($"UpdateAsync: {request.GetType().Name}({newQuery}) Succeeded: {Api.Succeeded}, Results: {Api.Response?.Results?.Count ?? 0}");
         if (!Api.Succeeded)
             log("Api: " + Api.ErrorSummary ?? Api.Error?.ErrorCode);
 
@@ -190,6 +283,40 @@ public class AutoQueryGridBase<Model> : AppAuthComponentBase
     protected override async Task OnParametersSetAsync()
     {
         await base.OnParametersSetAsync();
+
+        var query = ServiceStack.Pcl.HttpUtility.ParseQueryString(new Uri(NavigationManager.Uri).Query);
+        Skip = query[QueryParams.Skip]?.ConvertTo<int>() ?? 0;
+        Edit = query[QueryParams.Edit];
+        New = query[QueryParams.New]?.ConvertTo<bool>();
+
+        if (Edit != null || New == true)
+        {
+            if (EditModel == null || Properties.GetId(EditModel)?.ToString() != Edit)
+            {
+                var request = Apis!.QueryRequest<Model>();
+                request.QueryParams = new() {
+                    [PrimaryKeyName] = Edit
+                };
+                var requestWithReturn = (IReturn<QueryResponse<Model>>)request;
+                EditApi = await ApiAsync(requestWithReturn);
+                if (EditApi.Succeeded)
+                {
+                    var results = EditApi.Response?.Results;
+                    if (results?.Count == 1)
+                    {
+                        EditModel = EditApi.Response!.Results[0];
+                    }
+                    else if (results == null || results.Count == 0)
+                    {
+                        EditApi.AddFieldError(PrimaryKeyName, $"{typeof(Model).Name} with {PrimaryKeyName} '{Edit}' was not found");
+                    }
+                    else
+                    {
+                        EditApi.AddFieldError(PrimaryKeyName, $"Multiple results found for {typeof(Model).Name} with {PrimaryKeyName} '{Edit}'");
+                    }
+                }
+            }
+        }
         await UpdateAsync();
     }
 
@@ -208,5 +335,74 @@ public class AutoQueryGridBase<Model> : AppAuthComponentBase
         ApiPrefs = await LocalStorage.GetItemAsync<ApiPrefs>(CacheKey) ?? new();
 
         await UpdateAsync();
+    }
+
+    private DotNetObjectReference<AutoQueryGridBase<Model>>? dotnetRef;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            dotnetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("JS.registerKeyNav", dotnetRef);
+        }
+    }
+    public void Dispose() => dotnetRef?.Dispose();
+
+    protected virtual void CloseDialogs()
+    {
+        if (Edit != null)
+            OnEditDone();
+        ShowQueryPrefs = false;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task OnKeyNav(string key)
+    {
+        if (DisableKeyBindings != null && DisableKeyBindings(key))
+            return;
+
+        if (key == KeyCodes.Escape)
+        {
+            CloseDialogs();
+            return;
+        }
+        if (key == KeyCodes.ArrowLeft && canPrev)
+        {
+            await skipTo(-Take);
+            return;
+        }
+        if (key == KeyCodes.ArrowRight && canNext)
+        {
+            await skipTo(Take);
+            return;
+        }
+        Model? selectedItem = DataGrid != null ? DataGrid.SelectedItem : default;
+        var activeIndex = selectedItem != null 
+            ? Results.FindIndex(x => selectedItem.Equals(x))
+            : -1;
+        if (activeIndex == -1)
+        {
+            var firstRow = Results.FirstOrDefault();
+            if (firstRow != null && DataGrid != null)
+            {
+                await DataGrid!.SetSelectedItem(firstRow);
+            }
+            return;
+        }
+
+        var nextIndex = key switch
+        {
+            KeyCodes.ArrowUp => activeIndex - 1,
+            KeyCodes.ArrowDown => activeIndex + 1,
+            KeyCodes.Home => 0,
+            KeyCodes.End => Results.Count - 1,
+            _ => 0
+        };
+        if (nextIndex < 0)
+        {
+            nextIndex = Results.Count - 1;
+        }
+        await DataGrid!.SetSelectedItem(Results[nextIndex % Results.Count]);
     }
 }

@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
+using MyApp.Client.Shared.Components;
 using ServiceStack;
 using ServiceStack.Blazor;
 using ServiceStack.Blazor.Components;
@@ -94,12 +95,18 @@ public class DataGridBase<Model> : UiComponentBase
         await FiltersChanged.InvokeAsync();
     }
 
-    internal async Task OnRowSelected(MouseEventArgs e, Model model)
+    public Model? SelectedItem => selectedItem;
+    public async Task SetSelectedItem(Model model)
     {
         if (!AllowSelection) return;
         selectedItem = IsSelected(model) ? default : model;
         if (selectedItem != null)
             await RowSelected.InvokeAsync(selectedItem);
+    }
+
+    internal async Task OnRowSelected(MouseEventArgs e, Model model)
+    {
+        await SetSelectedItem(model);
     }
 
 
