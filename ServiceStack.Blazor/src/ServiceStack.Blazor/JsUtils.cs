@@ -1,9 +1,25 @@
-﻿using Microsoft.JSInterop;
+﻿using System.Linq;
+using Microsoft.JSInterop;
+using ServiceStack.Text;
 
 namespace ServiceStack.Blazor;
 
 public static class JsUtils
 {
+    public static async Task Log(this IJSRuntime js, params object[] args)
+    {
+        foreach (var arg in args)
+        {
+            Console.WriteLine(arg.Dump());
+        }
+        await js.ConsoleLog(args);
+    }
+
+    public static async Task ConsoleLog(this IJSRuntime js, params object[] args)
+    {
+        await js.InvokeVoidAsync("console.log", args);
+    }
+
     public static async Task<List<NavItem>> GetNavItemsAsync(this IJSRuntime js, string name)
     {
         var csv = await js.InvokeAsync<string>("JS.get", name);
@@ -30,5 +46,10 @@ public static class JsUtils
             to.Add(item);
         }
         return to;
+    }
+
+    public static async Task OpenAsync(this IJSRuntime js, string url, string? target = null)
+    {
+        await js.InvokeVoidAsync("window.open", url, target);
     }
 }
