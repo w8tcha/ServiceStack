@@ -47,11 +47,12 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase
     [Parameter] public bool ShowResetPreferences { get; set; } = true;
     [Parameter] public bool ShowFiltersView { get; set; } = true;
     [Parameter] public bool ShowNewItem { get; set; } = true;
+    [Parameter] public string ToolbarButtonClass { get; set; } = CssUtils.Tailwind.ToolbarButtonClass;
     [Parameter] public List<Model> Items { get; set; } = new();
     [Parameter] public RenderFragment? CreateForm { get; set; }
     [Parameter] public RenderFragment? EditForm { get; set; }
     [Parameter] public Predicate<string>? DisableKeyBindings { get; set; }
-
+    [Parameter] public TableStyle TableStyle { get; set; } = CssDefaults.Grid.DefaultTableStyle;
     [Parameter] public EventCallback<Column<Model>> HeaderSelected { get; set; }
     [Parameter] public EventCallback<Model> RowSelected { get; set; }
 
@@ -61,7 +62,8 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase
     List<Model> Results => Api?.Response?.Results ?? TypeConstants<Model>.EmptyList;
     int Total => Api?.Response?.Total ?? Results.Count;
 
-    [Parameter] public string ToolbarButtonClass { get; set; } = CssUtils.Tailwind.ToolbarButtonClass;
+    // needs to be outside Form to use full screen width
+    protected DynamicModalLookup? ModalLookup { get; set; }
 
     ApiResult<QueryResponse<Model>>? Api { get; set; }
     ApiResult<QueryResponse<Model>>? EditApi { get; set; }
@@ -398,10 +400,6 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase
         var autoQueryFilters = AppMetadata?.Plugins?.AutoQuery?.ViewerConventions;
         if (autoQueryFilters != null)
             FilterDefinitions = autoQueryFilters;
-
-        ApiPrefs = await LocalStorage.GetItemAsync<ApiPrefs>(CacheKey) ?? new();
-
-        await UpdateAsync();
     }
 
     private DotNetObjectReference<AutoQueryGrid<Model>>? dotnetRef;
@@ -409,8 +407,10 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase
     {
         if (firstRender)
         {
+            ApiPrefs = await LocalStorage.GetItemAsync<ApiPrefs>(CacheKey) ?? new();
             dotnetRef = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("JS.registerKeyNav", dotnetRef);
+            await UpdateAsync();
         }
     }
     public void Dispose() => dotnetRef?.Dispose();

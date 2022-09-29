@@ -525,7 +525,7 @@ namespace ServiceStack.NativeTypes
 
             metaType.Description = type.GetDescription();
             metaType.Notes = type.FirstAttribute<NotesAttribute>()?.Notes;
-            metaType.Icon = type.ToIcon();
+            metaType.Icon = type.GetIcon();
 
             var dcAttr = type.GetDataContract();
             if (dcAttr != null)
@@ -1193,7 +1193,7 @@ namespace ServiceStack.NativeTypes
                         return ret;
                     }).ToList();
 
-                var crudInterfaces = AutoCrudOperation.CrudInterfaceMetadataNames().ToSet();
+                var crudInterfaces = Crud.WriteInterfaces;
                 var crudTypeNamesForInclude = metadata.Operations
                     .Where(t => typesToExpand.Contains(t.Request.Name))
                     .SelectMany(x => x.Request.Implements)
