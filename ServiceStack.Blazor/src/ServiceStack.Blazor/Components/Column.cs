@@ -148,7 +148,9 @@ public class Column<Model> : UiComponentBase
             : string.IsNullOrEmpty(Format)
                 ? value?.ToString()
                 : string.Format("{0:" + Format + "}", value);
-        return formattedValue;
+        return formattedValue != null
+            ? TextUtils.Truncate(formattedValue, DataGrid!.MaxFieldLength)
+            : null;
     }
 
     internal RenderFragment<Model> CellTemplate
@@ -183,7 +185,6 @@ public class Column<Model> : UiComponentBase
                     if (!TextUtils.IsComplexType(value.GetType()))
                     {
                         builder.AddContent(3, GetFormattedValue(value));
-
                     }
                     else
                     {

@@ -1,64 +1,69 @@
-﻿@using ServiceStack.Text
+﻿@using System.Collections
+@using ServiceStack.Text
 
-@if (!TextUtils.IsComplexType(Value?.GetType()))
+@if (TextUtils.IsComplexType(Value?.GetType()))
 {
-    @Format(Value);
+    var isCollection = false;
+    var useValue = Value;
+
+    <span class=@CssUtils.ClassNames(@class)>
+        @if (Value is IEnumerable e && Value is not IDictionary)
+        {
+            isCollection = true;
+            useValue = EnumerableUtils.FirstOrDefault(e);
+        }
+
+        @if (IncludeIcon)
+        {
+            <Icon class=@IconClass Image=Value!.GetType().GetIcon() />
+        }
+        <span>
+        @if (isCollection)
+        {
+            @("[ ")
+        }
+        {
+            @{
+                if (TextUtils.IsComplexType(useValue?.GetType()))
+                {
+                    var dict = useValue.ToObjectDictionary();
+                    var keys = dict.Keys.ToList();
+                    var len = Math.Min(MaxNestedFields, keys.Count);
+                    for (var i = 0; i < len; i++)
+                    {
+                        var key = keys[i];
+                        var val = dict[key];
+                        var value = Format(val);
+                        var str = TextUtils.Truncate(value, MaxNestedFieldLength);
+                        if (i > 0)
+                        {
+                            @(", ")
+                        }
+                        {
+                            <b class="font-medium">@key</b>
+
+                            @($": {str}")
+                        }
+                    }
+                    if (keys.Count > len)
+                    {
+                        @("...")
+                    }
+                }
+                else
+                {
+                    @Format(useValue)
+                }
+            }
+        }
+        @if (isCollection)
+        {
+            @(" ]")
+        }
+        </span>
+    </span>
 }
 else
 {
-    if (Value is System.Collections.IEnumerable e && Value is not System.Collections.IDictionary)
-    {
-        var first = TextUtils.FirstOrDefault(e);
-        if (first == null)
-        {
-            @("[]")
-        }
-        else
-        {
-            if (TextUtils.IsComplexType(first.GetType()))
-            {
-                <span title=@TypeSerializer.Dump(Value)>@Format(Value)</span>
-            }
-            else
-            {
-                var i = 0;
-                foreach (var item in e)
-                {
-                    if (i++ > 0)
-                    {
-                        @(',')
-                    }
-                    @TextUtils.GetScalarText(item)
-                }
-            }
-        }
-    }
-    else
-    {
-        <span title=@TypeSerializer.Dump(Value)> {
-        @{
-            var dict = Value.ToObjectDictionary();
-            var keys = dict.Keys.ToList();
-            var len = Math.Min(MaxNestedFields, keys.Count);
-            for (var i = 0; i < len; i++)
-            {
-                var key = keys[i];
-                var val = dict[key];
-                var value = Format(val);
-                var str = TextUtils.Truncate(value, MaxNestedFieldLength);
-                if (i > 0)
-                {
-                    @(", ")
-                }
-                {
-                    <b class="font-medium">@key</b>@($": {str}")
-                }
-            }
-            if (keys.Count > len)
-            {
-                @("...")
-            }
-        }
-        } </span>
-    }
+    @Format(Value);
 }

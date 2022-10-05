@@ -28,7 +28,8 @@ public static class BlazorUtils
             Console.WriteLine(message ?? "");
     }
 
-    public static string FormatValue(object? value) => FormatValue(value, BlazorConfig.Instance.MaxFieldLength);
+    public static string FormatValue(object? value) => 
+        FormatValue(value, BlazorConfig.Instance.MaxFieldLength);
     public static string FormatValue(object? value, int maxFieldLength)
     {
         if (value == null)
@@ -36,20 +37,10 @@ public static class BlazorUtils
 
         if (TextUtils.IsComplexType(value?.GetType()))
         {
-            var str = TypeSerializer.Dump(value).TrimStart();
-            if (str.Length < maxFieldLength)
-                return str;
-            var to = TextUtils.Truncate(str, maxFieldLength);
-            if (to.StartsWith("{"))
-                return to + "... }";
-            else if (to.StartsWith("["))
-                return to + "... ]";
-            return to;
+            TextUtils.Dump(value);
         }
-        {
-            var str = TextUtils.GetScalarText(value);
-            return TextUtils.Truncate(str, maxFieldLength);
-        }
+        var s = TextUtils.GetScalarText(value);
+        return TextUtils.Truncate(s, maxFieldLength);
     }
 
     public static string FormatValueAsHtml(object? Value)
@@ -64,7 +55,7 @@ public static class BlazorUtils
                 return "[]";
 
             if (TextUtils.IsComplexType(first.GetType()))
-                return wrap(TypeSerializer.Dump(Value).HtmlEncode(), FormatValue(Value));
+                return wrap(TextUtils.FormatJson(Value).HtmlEncode(), FormatValue(Value));
 
             foreach (var item in e)
             {
@@ -92,7 +83,20 @@ public static class BlazorUtils
             sb.AppendLine("...");
 
         var html = StringBuilderCache.ReturnAndFree(sb);
-        return wrap(TypeSerializer.Dump(Value).HtmlEncode(), "{ " + html + " }");
+        return wrap(TextUtils.FormatJson(Value).HtmlEncode(), "{ " + html + " }");
     }
 
+    public static bool SupportsProperty(MetadataPropertyType? prop)
+    {
+        if (prop?.Type == null) 
+            return false;
+        if (prop.IsValueType == true || prop.IsEnum == true)
+            return true;
+
+        var unwrapType = prop.Type.EndsWith('?')
+            ? prop.Type[..^1]
+            : prop.Type;
+
+        return Html.Input.TypeNameMap.ContainsKey(unwrapType);
+    }
 }
