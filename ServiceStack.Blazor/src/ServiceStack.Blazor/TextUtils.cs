@@ -680,10 +680,22 @@ public static class TextUtils
     /// <summary>
     /// Create a Form Layout from a declarative annotated DTO definition
     /// </summary>
-    public static List<InputInfo> CreateFormLayout<T>(this MetadataType metadataType)
+    public static List<InputInfo> CreateFormLayout<T>(this MetadataType metadataType) => CreateFormLayout(metadataType, typeof(T));
+    public static List<InputInfo> CreateFormLayout(this MetadataType metadataType, Type type) => CreateFormLayout(metadataType, type, null);
+    public static List<InputInfo> CreateFormLayout(this MetadataType metadataType, Type type, AppMetadata? appMetadata)
     {
-        var typeProps = TypeProperties<T>.Instance.PropertyMap;
-        metadataType.Type ??= typeof(T);
+        var typeProps = TypeProperties.Get(type).PropertyMap;
+        metadataType.Type ??= type;
+
+        MetadataType? dataModel = null;
+        if (appMetadata != null)
+        {
+            var op = appMetadata.Api.Operations.FirstOrDefault(x => x.Request.Name == metadataType.Name);
+            if (op != null)
+            {
+                dataModel = appMetadata.GetType(op.DataModel);
+            }
+        }
 
         var formLayout = new List<InputInfo>();
         foreach (var prop in metadataType.Properties)
@@ -698,7 +710,25 @@ public static class TextUtils
             if (prop.Input == null)
                 prop.PopulateInput(Input.Create(prop.PropertyInfo));
 
-            formLayout.Add(prop.Input!);
+            var input = prop.Input!;
+            if (appMetadata != null)
+            {
+                if (input.Type == Input.Types.File && prop.UploadTo != null)
+                {
+                    var uploadLocation = appMetadata.Plugins.FilesUpload?.Locations.FirstOrDefault(x => x.Name == prop.UploadTo);
+                    if (uploadLocation?.AllowExtensions != null)
+                    {
+                        input.Accept ??= string.Join(',', uploadLocation.AllowExtensions.Map(x => x.StartsWith('.') ? x : $".{x}"));
+                    }
+                }
+                if (dataModel != null)
+                {
+                    var dataModelProp = dataModel.Property(prop.Name);
+                    prop.Ref ??= dataModelProp?.Ref;
+                }
+            }
+
+            formLayout.Add(input);
         }
         return formLayout;
     }
@@ -742,5 +772,18 @@ public static class TextUtils
         return count + " " + (count == 1
             ? word
             : Words.Pluralize(word));
+    }
+
+    const int k = 1024;
+    public static string[] ByteSizes = { "Bytes", "KB", "MB", "GB", "TB", "PB" };
+
+    public static string FormatBytes(long bytes, int decimals = 2)
+    {
+        if (bytes == 0)
+            return "0 bytes";
+        
+        var dm = decimals < 0 ? 0 : decimals;
+        var i = (int) Math.Floor(Math.Log(bytes) / Math.Log(k));
+        return (bytes / Math.Pow(k, i)).ToString("N" + dm) + ' ' + ByteSizes[i % ByteSizes.Length];
     }
 }

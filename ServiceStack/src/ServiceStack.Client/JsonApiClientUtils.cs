@@ -73,6 +73,15 @@ public static class JsonApiClientUtils
         return services.AddHttpClient<JsonApiClient>(client => client.BaseAddress = new Uri(baseUrl));
     }
     
+    public static IHttpClientBuilder AddJsonApiClient(this IServiceCollection services, string baseUrl, Action<HttpClient> configureClient)
+    {
+        return services.AddHttpClient<JsonApiClient>(client =>
+        {
+            client.BaseAddress = new Uri(baseUrl);
+            configureClient(client);
+        });
+    }
+    
     public static async Task<ApiResult<TResponse>> ApiAsync<TResponse>(this IHasJsonApiClient instance, IReturn<TResponse> request) =>
         await instance.Client!.ApiAsync(request);
 
@@ -91,6 +100,12 @@ public static class JsonApiClientUtils
             return await instance.Client!.ApiAsync(voidRequest);
         throw new NotSupportedException($"{request.GetType().Name} must implement IReturn<{typeof(Model).Name}>, IReturn<{nameof(IdResponse)}>, IReturn<{nameof(EmptyResponse)}> or IReturnVoid");
     }
+
+    public static async Task<ApiResult<TResponse>> ApiFormAsync<TResponse>(this IHasJsonApiClient instance, string method, string relativeOrAbsoluteUrl, MultipartFormDataContent request) =>
+        await instance.Client!.ApiFormAsync<TResponse>(method, relativeOrAbsoluteUrl, request);
+
+    public static async Task<ApiResult<TResponse>> ApiFormAsync<TResponse>(this IHasJsonApiClient instance, string relativeOrAbsoluteUrl, MultipartFormDataContent request) =>
+        await instance.Client!.ApiFormAsync<TResponse>(relativeOrAbsoluteUrl, request);
 
     public static async Task<TResponse> SendAsync<TResponse>(this IHasJsonApiClient instance, IReturn<TResponse> request) =>
         await instance.Client!.SendAsync(request);
@@ -140,7 +155,14 @@ public static class JsonApiClientUtils
 
     public static MultipartFormDataContent AddParam(this MultipartFormDataContent content, string key, object value)
     {
-        content.Add(new StringContent(value.ToJsv(), encoding:null, mediaType:MimeTypes.Jsv), $"\"{key}\"");
+        if (value is string str)
+        {
+            content.Add(new StringContent(str), $"\"{key}\"");
+        }
+        else
+        {
+            content.Add(new StringContent(value.ToJsv(), encoding: null, mediaType: MimeTypes.Jsv), $"\"{key}\"");
+        }
         return content;
     }
     

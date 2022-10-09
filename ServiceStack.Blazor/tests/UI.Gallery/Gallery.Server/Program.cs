@@ -40,15 +40,7 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
-app.UseStaticFiles(new StaticFileOptions
-{
-    OnPrepareResponse = ctx =>
-    {
-        const int durationInSeconds = 60 * 60 * 24;
-        ctx.Context.Response.Headers[HeaderNames.CacheControl] = "public,max-age=" + durationInSeconds;
-    }
-});
+app.UseStaticFiles();
 
 app.UseRouting();
 
@@ -59,6 +51,7 @@ app.UseServiceStack(new AppHost());
 
 BlazorConfig.Set(new() {
     Services = app.Services,
+    JSParseObject = JS.ParseObject,
     EnableLogging = app.Environment.IsDevelopment(),
     EnableVerboseLogging = app.Environment.IsDevelopment(),
 });

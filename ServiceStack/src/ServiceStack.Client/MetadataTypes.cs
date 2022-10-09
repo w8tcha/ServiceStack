@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -837,6 +838,7 @@ public class MetadataPropertyType
 
     public List<MetadataAttribute> Attributes { get; set; }
     
+    public string UploadTo { get; set; }
     public InputInfo Input { get; set; }
     public FormatInfo Format { get; set; }
     public RefInfo Ref { get; set; }
@@ -973,6 +975,9 @@ public static class AppMetadataUtils
 
     public static MetadataType GetType(this AppMetadata app, string name) => 
         app.GetCache().TypesMap.TryGetValue(name, out var type) ? type : null;
+
+    public static MetadataType GetType(this AppMetadata app, MetadataTypeName typeRef) =>
+        typeRef == null ? null : app.GetType(typeRef.Namespace, typeRef.Name);
 
     public static MetadataType GetType(this AppMetadata app, string @namespace, string name) => 
         X.Map(app.GetCache().TypesMap, x => x.TryGetValue(@namespace + "." + name, out var type) 
@@ -1476,6 +1481,12 @@ public static class AppMetadataUtils
         {
             property.Input ??= new InputInfo();
             property.Input.Css = css;
+        }
+        property.UploadTo = pi.FirstAttribute<UploadToAttribute>()?.Location;
+
+        if (property.Input?.Type == Input.Types.File)
+        {
+            property.Input.Multiple = (propType != typeof(string) && propType.HasInterface(typeof(IEnumerable))).NullIfFalse();
         }
 
         if (instance != null)
