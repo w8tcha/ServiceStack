@@ -166,6 +166,8 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
     bool CanUpdate => UpdateOp != null && CanAccess(UpdateOp);
     bool CanDelete => DeleteOp != null && CanAccess(DeleteOp);
 
+    [Parameter] public Action<QueryBase> ConfigureQuery { get; set; }
+
     [Parameter, SupplyParameterFromQuery] public int Skip { get; set; } = 0;
     [Parameter, SupplyParameterFromQuery] public bool? New { get; set; }
     [Parameter, SupplyParameterFromQuery] public string? Edit { get; set; }
@@ -307,8 +309,10 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
             foreach (string key in query)
             {
                 string? value = query[key];
-                var isProp = Properties.Any(x => x.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
-                if (value == null || !isProp) continue;
+                var isProp = Properties.Any(x => x.Name.Equals(key, StringComparison.OrdinalIgnoreCase))
+                    || Properties.Any(x => key.StartsWith(x.Name) || key.EndsWith(x.Name));
+                if (value == null || !isProp) 
+                    continue;
 
                 filters[key] = value;
                 sb.AppendQueryParam(key, query[key]);
@@ -331,6 +335,8 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
             request.Fields = fields;
         if (!string.IsNullOrEmpty(orderBy))
             request.OrderBy = orderBy;
+
+        ConfigureQuery?.Invoke(request);
 
         return request;
     }

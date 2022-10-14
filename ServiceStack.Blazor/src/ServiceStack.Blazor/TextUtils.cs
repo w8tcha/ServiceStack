@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
 using System.Text.Json;
+using ServiceStack.DataAnnotations;
 using ServiceStack.Html;
 using ServiceStack.Text;
 
@@ -508,6 +509,11 @@ public static class TextUtils
     public static bool IsComplexType(this Type? type)
     {
         return type != null && !type.IsValueType && type != typeof(string) && type != typeof(Uri);
+    }
+
+    public static bool IsComputed(this System.Reflection.PropertyInfo? prop)
+    {
+        return prop != null && prop.AllAttributes().Any(x => x.GetType() == typeof(ComputedAttribute) || x.GetType() == typeof(CustomSelectAttribute));
     }
 
     internal static object ConvertDumpType(object target)

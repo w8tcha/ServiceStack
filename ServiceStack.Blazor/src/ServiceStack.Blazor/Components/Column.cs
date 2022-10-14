@@ -3,6 +3,7 @@ using System.Reflection;
 using Microsoft.AspNetCore.Components;
 using System.Collections;
 using ServiceStack.Blazor.Components.Tailwind;
+using System.Data.Common;
 
 namespace ServiceStack.Blazor.Components;
 
@@ -92,6 +93,8 @@ public class Column<Model> : UiComponentBase
 
     public MetadataPropertyType? MetadataProperty { get; set; }
 
+    public bool IsComputed => PropertyAccessor != null ? TextUtils.IsComputed(PropertyAccessor.PropertyInfo) : MetadataProperty?.Attributes?.Any(x => x.Name == "Computed" || x.Name == "CustomSelect") == true;
+
     public List<AutoQueryConvention> Definitions => DataGrid?.FilterDefinitions ?? TypeConstants<AutoQueryConvention>.EmptyList;
 
     public string FormatValue(Type type, string value)
@@ -166,7 +169,7 @@ public class Column<Model> : UiComponentBase
                     ? $"hidden {VisibleFrom.Value.ToBreakpointCellClass()} "
                     : "";
 
-                cls += CellClass ?? ClassNames("px-6 py-4 whitespace-nowrap text-sm text-gray-500", @class);
+                cls += CellClass ?? ClassNames(CssDefaults.Grid.TableCellClass, @class);
 
                 builder.AddAttribute(1, "class", cls);
 
