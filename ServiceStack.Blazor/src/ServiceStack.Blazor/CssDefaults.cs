@@ -77,7 +77,8 @@ public static class CssDefaults
         public const string PanelClass = "pointer-events-auto w-screen xl:max-w-3xl md:max-w-xl max-w-lg";
         public const string TitlebarClass = "bg-gray-50 dark:bg-gray-900 px-4 py-6 sm:px-6";
         public const string HeadingClass = "text-lg font-medium text-gray-900 dark:text-gray-100";
-        public const string CloseButtonClass = "rounded-md bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500";
+        public const string CloseButtonClass = "rounded-md bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:ring-offset-black";
+        public const string LegendClass = "text-base font-medium text-gray-900 dark:text-gray-100 text-center mb-4";
 
         public static DataTransition SlideOverTransition = new DataTransition(
             entering: new(@class: "transform transition ease-in-out duration-500 sm:duration-700", from: "translate-x-full", to: "translate-x-0"),
@@ -92,11 +93,14 @@ public static class CssDefaults
 
     public static class SlideOver
     {
+        public const string SlideOverClass = "relative z-10";
+        public const string DialogClass = "pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10 sm:pl-16";
         public const string PanelClass = "pointer-events-auto w-screen xl:max-w-3xl md:max-w-xl max-w-lg";
-        public const string FormClass = "flex h-full flex-col divide-y divide-gray-200 dark:divide-gray-100 bg-white dark:bg-black shadow-xl";
+        public const string FormClass = "flex h-full flex-col divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-black shadow-xl";
         public const string TitlebarClass = "bg-gray-50 dark:bg-gray-900 px-4 py-6 sm:px-6";
         public const string HeadingClass = "text-lg font-medium text-gray-900 dark:text-gray-50";
-        
+        public const string CloseButtonClass = "rounded-md bg-gray-50 dark:bg-black text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:ring-offset-black";
+
         public const string TransitionClass = "transform transition ease-in-out duration-500 sm:duration-700";
     }
 

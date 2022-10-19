@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
 using ServiceStack.Text;
@@ -45,6 +46,7 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
     [Parameter] public bool ShowPagingNav { get; set; } = BlazorConfig.Instance.AutoQueryGridDefaults.ShowPagingNav;
     [Parameter] public bool ShowPagingInfo { get; set; } = BlazorConfig.Instance.AutoQueryGridDefaults.ShowPagingInfo;
     [Parameter] public bool ShowDownloadCsv { get; set; } = BlazorConfig.Instance.AutoQueryGridDefaults.ShowDownloadCsv;
+    [Parameter] public bool ShowRefresh { get; set; } = BlazorConfig.Instance.AutoQueryGridDefaults.ShowRefresh;
     [Parameter] public bool ShowCopyApiUrl { get; set; } = BlazorConfig.Instance.AutoQueryGridDefaults.ShowCopyApiUrl;
     [Parameter] public bool ShowResetPreferences { get; set; } = BlazorConfig.Instance.AutoQueryGridDefaults.ShowResetPreferences;
     [Parameter] public bool ShowFiltersView { get; set; } = BlazorConfig.Instance.AutoQueryGridDefaults.ShowFiltersView;
@@ -111,7 +113,16 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
         return formatUrl;
     }
 
-    async Task clearPrefs()
+    public async Task ClearFiltersAsync()
+    {
+        foreach (var c in GetColumns())
+        {
+            await c.RemoveSettingsAsync();
+        }
+        await UpdateAsync();
+    }
+
+    public async Task ResetPreferencesAsync()
     {
         foreach (var c in GetColumns())
         {
@@ -168,9 +179,9 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
 
     [Parameter] public Action<QueryBase> ConfigureQuery { get; set; }
 
-    [Parameter, SupplyParameterFromQuery] public int Skip { get; set; } = 0;
-    [Parameter, SupplyParameterFromQuery] public bool? New { get; set; }
-    [Parameter, SupplyParameterFromQuery] public string? Edit { get; set; }
+    [Parameter] public int Skip { get; set; } = 0;
+    [Parameter] public bool? New { get; set; }
+    [Parameter] public string? Edit { get; set; }
 
     int Take => ApiPrefs.Take;
 
@@ -233,20 +244,17 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
 
     async Task OnEditDoneAsync()
     {
-        //if (AutoEditForm != null)
-        //    await AutoEditForm.CloseAsync();
+        Edit = null;
         EditModel = default;
-        string uri = NavigationManager.Uri.SetQueryParam(QueryParams.Edit, null);
-        NavigationManager.NavigateTo(uri);
+        StateHasChanged();
+        NavigationManager.NavigateTo(NavigationManager.Uri.SetQueryParam(QueryParams.Edit, null));
     }
 
     async Task OnNewDoneAsync()
     {
-        //if (AutoCreateForm != null)
-        //    await AutoCreateForm.CloseAsync();
-        EditModel = default;
-        string uri = NavigationManager.Uri.SetQueryParam(QueryParams.New, null);
-        NavigationManager.NavigateTo(uri);
+        New = false;
+        StateHasChanged();
+        NavigationManager.NavigateTo(NavigationManager.Uri.SetQueryParam(QueryParams.New, null));
     }
 
     async Task OnEditSave(Model model)
@@ -271,10 +279,7 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
     string? primaryKeyName;
     string PrimaryKeyName => primaryKeyName ??= PrimaryKey.Name;
 
-    public QueryBase CreateRequestArgs() => CreateRequestArgs(out _);
-
-
-    public QueryBase CreateRequestArgs(out string queryString)
+    public QueryBase CreateRequestArgs()
     {
         // PK always needed
         var selectFields = ApiPrefs.SelectedColumns.Count > 0 && !ApiPrefs.SelectedColumns.Contains(PrimaryKeyName)
@@ -322,9 +327,11 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
         var strFilters = StringBuilderCache.ReturnAndFree(sb);
         strFilters.TrimEnd('&');
 
-        queryString = $"?skip={Skip}&take={Take}&fields={fields}&orderBy={orderBy}&{strFilters}";
 
         var request = Apis!.QueryRequest<Model>();
+        request.Meta ??= new();
+        request.Meta["_s"] = $"?skip={Skip}&take={Take}&fields={fields}&orderBy={orderBy}&{strFilters}";
+
         request.Skip = Skip;
         request.Take = Take;
         request.Include = "Total";
@@ -341,33 +348,56 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
         return request;
     }
 
-    async Task UpdateAsync()
+    public async Task RefreshAsync()
     {
-        var request = CreateRequestArgs(out var newQuery);
-        if (lastQuery == newQuery)
-            return;
-        lastQuery = newQuery;
+        lastQuery = null;
+        await UpdateAsync();
+    }
+
+    public async Task UpdateAsync() => await SearchAsync(CreateRequestArgs());
+
+    public async Task SearchAsync(QueryBase request)
+    {
+        if (request.Meta != null)
+        {
+            request.Meta.Remove("_s", out var newQuery);
+            if (request.Meta.Count == 0)
+                request.Meta = null;
+
+            if (lastQuery != null && lastQuery == newQuery)
+                return;
+
+            lastQuery = newQuery;
+        }
+        else
+        {
+            lastQuery = null;
+        }
 
         var requestWithReturn = (IReturn<QueryResponse<Model>>)request;
         Api = await ApiAsync(requestWithReturn);
 
-        log($"UpdateAsync: {request.GetType().Name}({newQuery}) Succeeded: {Api.Succeeded}, Results: {Api.Response?.Results?.Count ?? 0}");
+        log($"UpdateAsync: {request.GetType().Name}({lastQuery}) Succeeded: {Api.Succeeded}, Results: {Api.Response?.Results?.Count ?? 0}");
         if (!Api.Succeeded)
             log("Api: " + Api.ErrorSummary ?? Api.Error?.ErrorCode);
 
         StateHasChanged();
     }
 
-    protected override async Task OnParametersSetAsync()
+    void ParseQueryString(string queryString)
     {
-        await base.OnParametersSetAsync();
-        ApiPrefs = LocalStorage.GetCachedItem<ApiPrefs>(CacheKey) ?? new();
-
-        var query = Pcl.HttpUtility.ParseQueryString(new Uri(NavigationManager.Uri).Query);
+        var query = Pcl.HttpUtility.ParseQueryString(queryString);
         Skip = query[QueryParams.Skip]?.ConvertTo<int>() ?? 0;
         Edit = query[QueryParams.Edit];
         New = query[QueryParams.New]?.ConvertTo<bool>();
+    }
 
+    protected override async Task OnParametersSetAsync()
+    {
+        await base.OnParametersSetAsync();
+        ParseQueryString(new Uri(NavigationManager.Uri).Query);
+
+        ApiPrefs = LocalStorage.GetCachedItem<ApiPrefs>(CacheKey) ?? new();
         if (Edit != null || New == true)
         {
             if (EditModel == null || Properties.GetId(EditModel)?.ToString() != Edit)
@@ -397,12 +427,16 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
                 }
             }
         }
+        StateHasChanged();
+
         await UpdateAsync();
     }
 
     protected override async Task OnInitializedAsync()
     {
         await base.OnInitializedAsync();
+        NavigationManager.LocationChanged += HandleLocationChanged;
+
         if (AppMetadata == null)
         {
             appMetadataApi = await ApiAppMetadataAsync();
@@ -411,6 +445,11 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
         var autoQueryFilters = AppMetadata?.Plugins?.AutoQuery?.ViewerConventions;
         if (autoQueryFilters != null)
             FilterDefinitions = autoQueryFilters;
+    }
+
+    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        base.InvokeAsync(async () => await OnParametersSetAsync());
     }
 
     private DotNetObjectReference<AutoQueryGrid<Model>>? dotnetRef;
@@ -424,7 +463,11 @@ public partial class AutoQueryGrid<Model> : AuthBlazorComponentBase, IDisposable
             await UpdateAsync();
         }
     }
-    public void Dispose() => dotnetRef?.Dispose();
+    public void Dispose()
+    {
+        dotnetRef?.Dispose();
+        NavigationManager.LocationChanged -= HandleLocationChanged;
+    }
 
     protected virtual async Task CloseDialogsAsync()
     {
