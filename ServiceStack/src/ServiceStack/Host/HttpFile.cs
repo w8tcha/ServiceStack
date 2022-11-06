@@ -1,3 +1,6 @@
+#nullable enable
+
+using System;
 using System.IO;
 using ServiceStack.Web;
 
@@ -5,6 +8,16 @@ namespace ServiceStack.Host;
 
 public class HttpFile : IHttpFile
 {
+    public HttpFile() {}
+    public HttpFile(IHttpFile file) 
+    {
+        Name = file.Name;
+        FileName = file.FileName;
+        ContentLength = file.ContentLength;
+        ContentType = file.ContentType;
+        InputStream = file.InputStream;
+    }
+
     public string Name { get; set; }
     public string FileName { get; set; }
     public long ContentLength { get; set; }
