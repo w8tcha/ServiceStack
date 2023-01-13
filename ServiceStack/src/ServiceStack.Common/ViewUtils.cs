@@ -231,7 +231,8 @@ namespace ServiceStack
         public static string NavClass { get; set; } = "nav";
         public static string NavItemClass { get; set; } = "nav-item";
         public static string NavLinkClass { get; set; } = "nav-link";
-        
+        public static string ActiveClass { get; set; } = "active";
+
         public static string ChildNavItemClass { get; set; } = "nav-item dropdown";
         public static string ChildNavLinkClass { get; set; } = "nav-link dropdown-toggle";
         public static string ChildNavMenuClass { get; set; } = "dropdown-menu";
@@ -322,7 +323,8 @@ namespace ServiceStack
         public string NavClass { get; set; } = NavDefaults.NavClass;
         public string NavItemClass { get; set; } = NavDefaults.NavItemClass;
         public string NavLinkClass { get; set; } = NavDefaults.NavLinkClass;
-        
+        public string ActiveClass { get; set; } = NavDefaults.ActiveClass;
+
         public string ChildNavItemClass { get; set; } = NavDefaults.ChildNavItemClass;
         public string ChildNavLinkClass { get; set; } = NavDefaults.ChildNavLinkClass;
         public string ChildNavMenuClass { get; set; } = NavDefaults.ChildNavMenuClass;
@@ -339,6 +341,15 @@ namespace ServiceStack
         public static void Load(IAppSettings settings) => ViewUtils.Load(settings);
 
         public static List<NavItem> GetNavItems(string key) => ViewUtils.GetNavItems(key);
+    }
+
+    public static class When
+    {
+        public static string IsAuthenticated => "auth";
+        public static string HasRole(string role) => $"role:{role}";
+        public static string HasPermission(string perm) => $"perm:{perm}";
+        public static string HasScope(string scope) => $"scope:{scope}";
+        public static string HasClaim(string claim) => $"claim:{claim}";
     }
 
     /// <summary>
@@ -1191,7 +1202,7 @@ namespace ServiceStack
                 var dir = vfs.GetDirectory(virtualPath);
                 if (dir != null)
                 {
-                    var files = dir.GetAllFiles();
+                    var files = dir.GetAllFiles().OrderBy(x => x.VirtualPath);
                     foreach (var dirFile in files)
                     {
                         if (!assetExt.EqualsIgnoreCase(dirFile.Extension))
@@ -1307,7 +1318,7 @@ namespace ServiceStack
                             var outDir = webVfs.GetDirectory(outDirPath);
                             if (outDir != null)
                             {
-                                var outDirFiles = outDir.GetFiles();
+                                var outDirFiles = outDir.GetFiles().OrderBy(x => x.VirtualPath);
                                 foreach (var file in outDirFiles)
                                 {
                                     if (file.Name.Glob(outGlobFile))

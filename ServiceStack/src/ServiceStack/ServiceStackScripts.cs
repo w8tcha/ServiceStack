@@ -256,6 +256,7 @@ namespace ServiceStack
         }
 
         public string userAuthId(ScriptScopeContext scope) => scope.GetRequest().GetSession()?.UserAuthId;
+        public int? userAuthIntId(ScriptScopeContext scope) => scope.GetRequest().GetSession()?.UserAuthId.ToInt();
         public string userAuthName(ScriptScopeContext scope)
         {
             var authSession = scope.GetRequest().GetSession();
@@ -809,7 +810,7 @@ namespace ServiceStack
             var attrs = new HashSet<string>();
             if (authSession?.IsAuthenticated == true)
             {
-                attrs.Add("auth");
+                attrs.Add(When.IsAuthenticated);
                 
                 if (HostContext.HasValidAuthSecret(request))
                     attrs.Add(RoleNames.Admin);
@@ -835,14 +836,14 @@ namespace ServiceStack
                 {
                     foreach (var role in roles)
                     {
-                        attrs.Add("role:" + role);
+                        attrs.Add(When.HasRole(role));
                     }
                 }
                 if (permissions != null)
                 {
                     foreach (var perm in permissions)
                     {
-                        attrs.Add("perm:" + perm);
+                        attrs.Add(When.HasPermission(perm));
                     }
                 }
                 
@@ -852,7 +853,7 @@ namespace ServiceStack
                     {
                         foreach (var item in extended.Scopes)
                         {
-                            attrs.Add("scope:" + item);
+                            attrs.Add(When.HasScope(item));
                         }
                     }
                 }
@@ -861,7 +862,7 @@ namespace ServiceStack
                 {
                     foreach (var claim in claims)
                     {
-                        attrs.Add("claim:" + claim);
+                        attrs.Add(When.HasClaim(claim.ToString()));
                     }
                 }
             }
@@ -872,12 +873,9 @@ namespace ServiceStack
         
         public static NavOptions WithDefaults(this NavOptions options, IRequest request)
         {
-            if (options == null)
-                options = new NavOptions();
-            if (options.ActivePath == null)
-                options.ActivePath = request.PathInfo;
-            if (options.Attributes == null)
-                options.Attributes = request.GetUserAttributes();
+            options ??= new NavOptions();
+            options.ActivePath ??= request.PathInfo;
+            options.Attributes ??= request.GetUserAttributes();
             var pathBase = HostContext.Config.PathBase;
             if (!string.IsNullOrEmpty(pathBase))
                 options.BaseHref = pathBase;
