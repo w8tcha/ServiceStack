@@ -122,6 +122,18 @@ namespace ServiceStack
         /// Whether to wrap JS scripts in an Immediately-Invoked Function Expression
         /// </summary>
         public bool IIFE { get; set; }
+        /// <summary>
+        /// Whether to "async" load script (default false)
+        /// </summary>
+        public bool Async { get; set; }
+        /// <summary>
+        /// Whether to "defer" loading script (default false)
+        /// </summary>
+        public bool Defer { get; set; }
+        /// <summary>
+        /// Whether script should be loaded as a "module" (default false)
+        /// </summary>
+        public bool Module { get; set; }
     }
 
     public class TextDumpOptions
@@ -345,6 +357,8 @@ namespace ServiceStack
 
     public static class When
     {
+        public static string Development => "dev";
+        public static string Production => "prod";
         public static string IsAuthenticated => "auth";
         public static string HasRole(string role) => $"role:{role}";
         public static string HasPermission(string perm) => $"perm:{perm}";
@@ -1236,7 +1250,11 @@ namespace ServiceStack
             var assetExt = "js";
             var outFile = options.OutputTo ?? (options.Minify 
                   ? $"/{assetExt}/bundle.min.{assetExt}" : $"/{assetExt}/bundle.{assetExt}");
-            var htmlTagFmt = "<script src=\"{0}\"></script>";
+            var modifiers = "";
+            if (options.Module) modifiers += " type=\"module\"";
+            if (options.Async) modifiers += " async";
+            if (options.Defer) modifiers += " defer";
+            var htmlTagFmt = "<script src=\"{0}\"" + modifiers + "></script>";
 
             return BundleAsset(filterName, 
                 webVfs, 

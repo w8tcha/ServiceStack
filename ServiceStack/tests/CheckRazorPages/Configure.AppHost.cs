@@ -21,11 +21,8 @@ public class AppHost : AppHostBase, IHostingStartup
         SetConfig(new HostConfig {
         });
 
-        Plugins.Add(new RazorFormat {
-            RazorPages = true,
-            ForbiddenRedirect = "/forbidden",
-            //ForbiddenPartial = "~/Pages/Shared/Forbidden.cshtml", //alternative: render partial instead 
-        });
+        // Allow return .html pages without extension  
+        Plugins.Add(new StaticFilePrettyUrlsFeature());
         
         // For TodosService
         Plugins.Add(new AutoQueryDataFeature());
