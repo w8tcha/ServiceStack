@@ -585,6 +585,13 @@ namespace ServiceStack.NativeTypes.CSharp
                 return "null";
             if (alias == "string")
                 return value.ToEscapedString();
+            
+            if (value.IsTypeValue() && !string.IsNullOrEmpty(Config.GlobalNamespace))
+            {
+                //Only emit type as Namespaces are merged
+                return "typeof(" + value.ExtractTypeName() + ")";
+            }
+            
             return value;
         }
 
