@@ -93,6 +93,8 @@ public class PublishTasks
             onOut:   Console.WriteLine, 
             onError: Console.Error.WriteLine);
         
+        // modules are copied over as debug versions then minified/cached at runtime on load
+        
         // copy to modules/ui
         transformOptions.CopyAll(
             source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("ui")), 
@@ -101,10 +103,10 @@ public class PublishTasks
             ignore: file => IgnoreUiFiles.Contains(file.VirtualPath),
             afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
         
-        // copy to modules/locode
+        // copy to modules/locode-v1
         transformOptions.CopyAll(
-            source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("locode")), 
-            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("locode")), 
+            source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("locode-v1")), 
+            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("locode-v1")), 
             cleanTarget: true,
             ignore: file => IgnoreUiFiles.Contains(file.VirtualPath),
             afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
@@ -123,15 +125,50 @@ public class PublishTasks
             target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("shared")),
             cleanTarget: true,
             afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
-        
-        // copy to modules/locode2
+
+        // copy to js
+        // gets served as a static file so need to copy prod version to /js
+        FilesTransformer.Defaults(debugMode:false).CopyAll(
+            source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("wwwroot/js")),
+            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("../js")),
+            cleanTarget: true,
+            afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
+
+        FilesTransformer.Defaults(debugMode:false).CopyAll(
+            source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("wwwroot/css/")),
+            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("../css")),
+            cleanTarget: true,
+            afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
+
+
+        // copy to modules/locode
         var moduleOptions = FilesTransformer.Defaults(debugMode: true);
         moduleOptions.FileExtensions["html"].LineTransformers = FilesTransformer.HtmlModuleLineTransformers.ToList();
         moduleOptions.CopyAll(
-            source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("locode2")), 
-            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("locode2")), 
+            source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("locode")), 
+            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("locode")), 
             cleanTarget: true,
             ignore: file => IgnoreUiFiles.Contains(file.VirtualPath),
+            afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
+        
+        // copy to /Templates/HtmlFormat.html
+        moduleOptions.CopyAll(
+            source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("wwwroot/Templates/")),
+            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("../Templates")),
+            cleanTarget: true,
+            afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
+    }
+
+    [Test]
+    public void Copy_mjs()
+    {
+        Directory.SetCurrentDirectory(ProjectDir);
+
+        // copy to js
+        FilesTransformer.Defaults(debugMode: false).CopyAll(
+            source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("wwwroot/js")),
+            target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("../js")),
+            cleanTarget: true,
             afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
     }
 

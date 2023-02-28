@@ -223,6 +223,9 @@ public class FormatInfo
 [Exclude(Feature.Soap)]
 public class RefInfo
 {
+    [IgnoreDataMember]
+    public Type ModelType { get; set; }
+
     public string Model { get; set; }
     public string SelfId { get; set; }
     public string RefId { get; set; }
@@ -1478,6 +1481,113 @@ public static class AppMetadataUtils
             .ToArray();
     }
 
+    public static RefInfo CreateRefModel(this AppMetadata meta, string model)
+    {
+        var refType = meta.GetType(model);
+        var pk = refType?.Properties?.FirstOrDefault(x => x.IsPrimaryKey == true);
+        if (pk == null)
+            return null;
+
+        var firstStringProp = pk.Type != nameof(String) 
+            ? refType.Properties.FirstOrDefault(x => x.IsPrimaryKey != true && x.Type == nameof(String))
+            : null;
+        var refInfo = new RefInfo
+        {
+            Model = refType.Name,
+            RefId = pk.Name,
+            RefLabel = firstStringProp?.Name,
+        };
+        return refInfo;
+    }
+
+    public static RefInfo CreateRef(this AppMetadata meta, MetadataType type, MetadataPropertyType p)
+    {
+        if (p?.Ref != null)
+            return p.Ref;
+        
+        if (p?.PropertyInfo == null)
+        {
+            // Attempt to use naming convention to create ref
+            if (p?.Name.Length > 2 && p.Name.EndsWith("Id"))
+            {
+                var model = p.Name.Substring(0, p.Name.Length - 2);
+                return meta.CreateRefModel(model);
+            }
+            return null;
+        }
+        
+        var allAttrs = p.PropertyInfo.AllAttributes();
+        var refAttr = allAttrs.OfType<RefAttribute>().FirstOrDefault();
+        if (refAttr != null)
+        {
+            if (!refAttr.None)
+            {
+                var model = refAttr.Model ?? refAttr.ModelType?.Name;
+                if (model == null)
+                    return null;
+                return new RefInfo {
+                    ModelType = refAttr.ModelType,
+                    Model = model, 
+                    SelfId = refAttr.SelfId, 
+                    RefId = refAttr.RefId, 
+                    RefLabel = refAttr.RefLabel,
+                };
+            }
+            return null;
+        }
+
+        var refsAttr = allAttrs.OfType<ReferencesAttribute>().FirstOrDefault();
+        if (refsAttr != null)
+            return meta.CreateRefModel(refsAttr.Type.Name);
+
+        var fkAttr = allAttrs.OfType<ForeignKeyAttribute>().FirstOrDefault();
+        if (fkAttr != null)
+            return meta.CreateRefModel(fkAttr.Type.Name);
+
+        if (allAttrs.OfType<ReferenceAttribute>().FirstOrDefault() != null)
+        {
+            var pt = p.PropertyInfo.PropertyType;
+            var typePk = type.Properties?.FirstOrDefault(prop => prop.IsPrimaryKey == true);
+            if (pt.HasInterface(typeof(IEnumerable)))
+            {
+                if (typePk == null)
+                    return null;
+                    
+                var refType = pt.GetCollectionType();
+                var refMetaType = meta.GetType(refType.Name);
+                if (refMetaType == null)
+                    return null;
+                    
+                var fkId = type.Name + "Id";
+                var fkProp = refMetaType.Properties?.FirstOrDefault(prop => prop.Name == fkId);
+                    
+                return fkProp == null ? null : new RefInfo
+                {
+                    Model = refType.Name,
+                    SelfId = typePk.Name,
+                    RefId = fkProp.Name,
+                };
+            }
+            else
+            {
+                var selfRefId = pt.Name + "Id";
+                var selfRef = type.Properties?.FirstOrDefault(prop => prop.Name == selfRefId);
+                if (selfRef == null)
+                    return meta.CreateRefModel(pt.Name);
+                var refMetaType = meta.GetType(pt.Name);
+                var fkProp = refMetaType?.Properties?.FirstOrDefault(prop => prop.IsPrimaryKey == true);
+                    
+                return fkProp == null ? null : new RefInfo
+                {
+                    Model = pt.Name,
+                    SelfId = selfRefId,
+                    RefId = fkProp.Name,
+                };
+            }
+        }
+        return null;
+    }
+
     internal static bool ContainsMatch(this HashSet<Type> types, Type target)
     {
         if (types == null)
@@ -1489,6 +1599,124 @@ public static class AppMetadataUtils
         return types.Any(x => x.IsGenericTypeDefinition && target.IsOrHasGenericInterfaceTypeOf(x));
     }
 
+    public static PropertyInfo GetPrimaryKey(this PropertyInfo[] props)
+    {
+        var hasPkAttr =
+            props.FirstOrDefault(p => p?.HasAttributeCached<PrimaryKeyAttribute>() == true) ??
+            props.FirstOrDefault(p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase)) ??
+            props.FirstOrDefault(p => p?.HasAttributeCached<AutoIncrementAttribute>() == true) ??
+            props.FirstOrDefault(p => p?.HasAttributeCached<AutoIdAttribute>() == true);
+
+        if (hasPkAttr != null)
+        {
+            return hasPkAttr;
+        }
+        return null;
+    }
+
+    public static RefInfo CreateRefModel(this Type refType)
+    {
+        var props = refType.GetAllProperties();
+        var pk = props.GetPrimaryKey();
+        if (pk == null)
+            return null;
+
+        var firstStringProp = pk.PropertyType != typeof(string)
+            ? props.FirstOrDefault(x => x != pk && x.PropertyType == typeof(string))
+            : null;
+        var refInfo = new RefInfo
+        {
+            ModelType = refType,
+            Model = refType.Name,
+            RefId = pk.Name,
+            RefLabel = firstStringProp?.Name,
+        };
+        return refInfo;
+    }
+
+    /// <summary>
+    /// Best effort to create RefInfo from Reflection alone
+    /// </summary>
+    public static RefInfo CreateRef(this MetadataPropertyType p)
+    {
+        if (p?.Ref != null)
+            return p.Ref;
+        
+        if (p?.PropertyInfo == null)
+            return null;
+        
+        var allAttrs = p.PropertyInfo.AllAttributes();
+        var refAttr = allAttrs.OfType<RefAttribute>().FirstOrDefault();
+        if (refAttr != null)
+        {
+            if (!refAttr.None)
+            {
+                var model = refAttr.Model ?? refAttr.ModelType?.Name;
+                if (model == null)
+                    return null;
+                return new RefInfo {
+                    ModelType = refAttr.ModelType,
+                    Model = model, 
+                    SelfId = refAttr.SelfId, 
+                    RefId = refAttr.RefId, 
+                    RefLabel = refAttr.RefLabel,
+                };
+            }
+            return null;
+        }
+        if (!ClientConfig.ImplicitRefInfo)
+            return null;
+        
+        var refsAttr = allAttrs.OfType<ReferencesAttribute>().FirstOrDefault();
+        if (refsAttr != null)
+            return refsAttr.Type.CreateRefModel();
+ 
+        var fkAttr = allAttrs.OfType<ForeignKeyAttribute>().FirstOrDefault();
+        if (fkAttr != null)
+            return fkAttr.Type.CreateRefModel();
+
+        if (allAttrs.OfType<ReferenceAttribute>().FirstOrDefault() != null)
+        {
+            var pt = p.PropertyInfo.PropertyType;
+            var props = p.PropertyInfo.DeclaringType?.GetAllProperties() ?? Array.Empty<PropertyInfo>();
+            var typePk = props.GetPrimaryKey();
+            if (pt.HasInterface(typeof(IEnumerable)))
+            {
+                if (typePk == null)
+                    return null;
+
+                var refType = pt.GetCollectionType();
+                var refTypeProps = refType.GetAllProperties();
+                    
+                var fkId = refType.Name + "Id";
+                var fkProp = refTypeProps.FirstOrDefault(prop => prop.Name == fkId);
+                    
+                return fkProp == null ? null : new RefInfo
+                {
+                    Model = refType.Name,
+                    SelfId = typePk.Name,
+                    RefId = fkProp.Name,
+                };
+            }
+            else
+            {
+                var selfRefId = pt.Name + "Id";
+                var selfRef = props.FirstOrDefault(prop => prop.Name == selfRefId);
+                if (selfRef == null)
+                    return pt.CreateRefModel();
+                    
+                var refMetaTypeProps = pt.GetAllProperties();
+                var fkProp = refMetaTypeProps.GetPrimaryKey();
+                return fkProp == null ? null : new RefInfo
+                {
+                    Model = pt.Name,
+                    SelfId = selfRefId,
+                    RefId = fkProp.Name,
+                };
+            }            
+        }
+        return null;
+    }
 
     // Shared by NativeTypesMetadata.ToProperty
     public static MetadataPropertyType ToMetadataPropertyType(this PropertyInfo pi, object instance = null, Dictionary<string, object> ignoreValues = null,
@@ -1510,6 +1738,7 @@ public static class AppMetadataUtils
             GenericArgs = propType.ToGenericArgs(),
             Description = pi.GetDescription(),
         };
+        property.Ref = property.CreateRef();
 
         property.Format ??= pi.FirstAttribute<Intl>().ToFormat();
         property.Format ??= pi.FirstAttribute<FormatAttribute>().ToFormat();
