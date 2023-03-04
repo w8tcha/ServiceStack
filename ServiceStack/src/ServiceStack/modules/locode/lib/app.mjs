@@ -199,6 +199,7 @@ export const sideNav = ((Server) => {
     if (alwaysHideTags) {
         sideNav = sideNav.filter(group => alwaysHideTags.indexOf(group.tag) < 0)
     }
+    
     return sideNav
 })(globalThis.Server);
 /** App's primary reactive store maintaining global functionality for Locode Apps
@@ -291,19 +292,6 @@ let store = {
             }
         })
     },
-    /** @param opt
-     *  @return {Function}
-     *  @constructor */
-    SignIn(opt) {
-        return globalThis.Server.plugins.auth
-            ? SignIn({
-                plugin: globalThis.Server.plugins.auth,
-                provider:() => routes.provider,
-                login:args => this.login(args, opt && opt.$on),
-                api: () => this.api
-            })
-            : NoAuth({ message:`Welcome to ${this.serviceName}` })
-    },
     /** @param {any} args
      *  @param {Function} [$on] */
     login(args, $on) {
@@ -381,7 +369,8 @@ export { store }
 app.events.subscribe('route:nav', args => store.init())
 app.use(ServiceStackVue)
 app.component('RouterLink', ServiceStackVue.component('RouterLink'))
-app.provides({ client, store, routes, breakpoints, settings, server:globalThis.Server })
+app.provides({ app, client, store, routes, breakpoints, settings, server:globalThis.Server })
+           
 setConfig({
     navigate: (url) => {
         console.debug('navigate', url)
