@@ -267,41 +267,21 @@ let store = {
         })
     },
 
-    /** @param {any} args */
-    login(args) {
-        let provider = routes.provider || 'credentials'
-        let authProvider = server.plugins.auth.authProviders.find(x => x.name === provider)
-            || server.plugins.auth.authProviders[0]
-        if (!authProvider)
-            throw new Error("!authProvider")
-        let auth = new Authenticate()
-        bearerToken = authsecret = null
-        if (authProvider.type === 'Bearer') {
-            bearerToken = client.bearerToken = (args['BearerToken'] || '').trim()
-        } else if (authProvider.type === 'authsecret') {
-            authsecret = (args['authsecret'] || '').trim()
-            client.headers.set('authsecret',authsecret)
-        } else {
-            auth = new Authenticate({ provider, ...args })
+    /** @param {AuthenticateResponse} auth */
+    login(auth) {
+        globalThis.AUTH = this.auth = auth
+        AppData.bearerToken = AppData.authsecret = null
+        if (auth.bearerToken) {
+            AppData.bearerToken = client.bearerToken = auth.bearerToken
         }
-        client.api(auth, { jsconfig: 'eccn' })
-            .then(r => {
-                this.api = r
-                if (r.error && !r.error.message)
-                    r.error.message = Meta.HttpErrors[r.errorCode] || r.errorCode
-                if (this.api.succeeded) {
-                    this.auth = this.api.response
-                    setBodyClass({ auth: this.auth })
-                }
-            })
+        setBodyClass({ auth: this.auth })
     },
 
     logout() {
-        setBodyClass({ auth: this.auth })
+        globalThis.AUTH = this.auth = AppData.authsecret = AppData.bearerToken = client.bearerToken = null
+        setBodyClass({ auth: null })
         client.api(new Authenticate({ provider: 'logout' }))
-        authsecret = bearerToken = client.bearerToken = null
         client.headers.delete('authsecret')
-        this.auth = null
         routes.to({ $page:null })
     },
 
