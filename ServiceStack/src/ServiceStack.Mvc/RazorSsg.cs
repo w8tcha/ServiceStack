@@ -66,6 +66,19 @@ public class RazorSsg
             : null;
     }
     
+    public static string? GetBaseUrl()
+    {
+        var args = Environment.GetCommandLineArgs()
+            .Select(arg => arg.TrimPrefixes("/", "--")).ToList();
+        var argPos = args.IndexOf("BaseUrl");
+        var baseUrl = (argPos >= 0 && argPos + 1 < args.Count
+            ? args[argPos + 1]
+            : null) ?? Environment.GetEnvironmentVariable("BASE_URL");
+        return !string.IsNullOrEmpty(baseUrl) 
+            ? baseUrl 
+            : RazorSsg.GetBaseHref();
+    }
+    
     public static async Task<string?> GetPageRouteAsync(IVirtualFile razorFile)
     {
         using var readFs = razorFile.OpenText();
@@ -246,8 +259,12 @@ public class RazorSsg
             if (onGetAsyncInvoker != null)
                 await onGetAsyncInvoker(pageModel);
             
+            var pathInfo = pageRoute == null || pageRoute.Contains('{')
+                ? staticPath.LastLeftPart('.')
+                : pageRoute;
+
             await using var fs = File.OpenWrite(toPath);
-            var ctx = CreateHttpContext(appHost, pathInfo: pageRoute ?? staticPath.LastLeftPart('.'));
+            var ctx = CreateHttpContext(appHost, pathInfo:pathInfo);
             await razorPages.WriteHtmlAsync(fs, viewResult.View, model: pageModel, ctx: ctx);
         }
     }

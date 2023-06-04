@@ -368,6 +368,8 @@ namespace ServiceStack.OrmLite
             return NamingStrategy.GetSchemaName(schema);
         }
 
+        public virtual string GetTableName(Type modelType) => GetTableName(modelType.GetModelDefinition());
+
         public virtual string GetTableName(ModelDefinition modelDef) => 
             GetTableName(modelDef.ModelName, modelDef.Schema, useStrategy:true);
 
@@ -391,6 +393,8 @@ namespace ServiceStack.OrmLite
                 : QuoteIfRequired(table);
         }
 
+        public virtual string GetQuotedTableName(Type modelType) => GetQuotedTableName(modelType.GetModelDefinition());
+        
         public virtual string GetQuotedTableName(ModelDefinition modelDef)
         {
             return GetQuotedTableName(modelDef.ModelName, modelDef.Schema);
