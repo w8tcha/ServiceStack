@@ -48,7 +48,7 @@ public class BulkInserts
     public Database Database;
 
     IDbConnectionFactory dbFactory;
-    const int MaxContacts = 100000;
+    const int MaxContacts = 1000000;
     private Contact[] Contacts; 
 
     [GlobalSetup]
@@ -81,7 +81,7 @@ public class BulkInserts
             Contacts[i] = CreateContact(i);
         }
     }
-
+    
     [IterationSetup]
     public void IterationSetup()
     {
@@ -105,8 +105,8 @@ public class BulkInserts
 
     Contact CreateContact(int i) => new() { Id = i + 1, FirstName = "First" + i, LastName = "Last" + i, Age = i % 100 };
 
-    // [Benchmark]
-    [Arguments(100)]
+    [Benchmark]
+    // [Arguments(100)]
     [Arguments(1000)]
     public void SingleInserts(int n)
     {
@@ -121,7 +121,7 @@ public class BulkInserts
     [Arguments(1000)]
     [Arguments(10000)]
     [Arguments(100000)]
-    [Arguments(1000000)]
+    // [Arguments(1000000)]
     public void BatchInserts(int n)
     {
         using var db = GetConnection(Database);
@@ -129,11 +129,11 @@ public class BulkInserts
         db.BulkInsert(contacts, new BulkInsertConfig { Mode = BulkInsertMode.Sql });
     }
 
-    // [Benchmark]
+    [Benchmark]
     [Arguments(1000)]
     [Arguments(10000)]
     [Arguments(100000)]
-    [Arguments(1000000)]
+    // [Arguments(1000000)]
     public void BatchInsertsOptimized(int n)
     {
         using var db = GetConnection(Database);

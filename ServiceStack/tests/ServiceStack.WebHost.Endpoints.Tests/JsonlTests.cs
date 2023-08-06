@@ -1,6 +1,8 @@
 using NUnit.Framework;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using ServiceStack.Text;
 using ServiceStack.Text.Json;
 
@@ -50,5 +52,39 @@ public class JsonlTests
         var fromJsonl = JsonlSerializer.DeserializeFromString<Rockstar>(jsonl);
         Assert.That(fromJsonl, Is.EqualTo(rockstar));
     }
+
+#if NET6_0_OR_GREATER
+    public class Album
+    {
+        public long AlbumId { get; set; }
+        public string Title { get; set; }
+        public long ArtistId { get; set; }
+    }
+
+    [Explicit("Integration"), Test]
+    public async Task Can_parse_with_StringReader()
+    {
+        const string BaseUrl = "https://blazor-gallery.servicestack.net";
+        var url = BaseUrl.CombineWith("albums.jsonl").AddQueryParam("take", 10);
+        await using var stream = await url.GetStreamFromUrlAsync();
+        await foreach (var line in stream.ReadLinesAsync())
+        {
+            var row = line.FromJson<Album>();
+            row.PrintDump();
+        }
+    }
+
+    [Explicit("Integration"), Test]
+    public async Task Can_serialize_jsonl_from_string()
+    {
+        const string BaseUrl = "https://blazor-gallery.servicestack.net";
+        var url = BaseUrl.CombineWith("albums.jsonl").AddQueryParam("take", 10);
+        var jsonl = await url.GetStringFromUrlAsync();
+        var albums = JsonlSerializer.DeserializeFromString<List<Album>>(jsonl);
+        albums.PrintDump();
+        JsonlSerializer.SerializeToString(albums).Print();
+        Assert.That(albums.Count, Is.EqualTo(10));
+    }
+#endif
     
 }
