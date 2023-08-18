@@ -1,32 +1,28 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Net;
-using System.Threading;
-using System.Threading.Tasks;
-using Amazon.S3;
-using Amazon.S3.Model;
-using ServiceStack.Aws;
-using ServiceStack.Aws.S3;
+using Google;
+using Google.Api.Gax;
+using Google.Apis.Storage.v1.Data;
+using Google.Cloud.Storage.V1;
+using ServiceStack.IO;
 using ServiceStack.Text;
 using ServiceStack.VirtualPath;
+using Object = Google.Apis.Storage.v1.Data.Object;
 
-namespace ServiceStack.IO;
+namespace ServiceStack.GoogleCloud;
 
-public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualFiles
+public partial class GoogleCloudVirtualFiles : AbstractVirtualPathProviderBase, IVirtualFiles
 {
     public const int MultiObjectLimit = 1000;
 
-    public IAmazonS3 AmazonS3 { get; private set; }
+    public StorageClient StorageClient { get; private set; }
     public string BucketName { get; private set; }
-    protected readonly S3VirtualDirectory rootDirectory;
+    protected readonly GoogleCloudVirtualDirectory rootDirectory;
 
-    public S3VirtualFiles(IAmazonS3 client, string bucketName)
+    public GoogleCloudVirtualFiles(StorageClient client, string bucketName)
     {
-        this.AmazonS3 = client;
+        this.StorageClient = client;
         this.BucketName = bucketName;
-        this.rootDirectory = new S3VirtualDirectory(this, null, null);
+        this.rootDirectory = new GoogleCloudVirtualDirectory(this, null, null);
     }
 
     public const char DirSep = '/';
@@ -39,7 +35,7 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
 
     protected override void Initialize() {}
 
-    public override IVirtualFile GetFile(string virtualPath)
+    public override IVirtualFile? GetFile(string virtualPath)
     {
         if (string.IsNullOrEmpty(virtualPath))
             return null;
@@ -47,40 +43,36 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
         var filePath = SanitizePath(virtualPath);
         try
         {
-            var response = AmazonS3.GetObject(new GetObjectRequest
-            {
-                Key = filePath,
-                BucketName = BucketName,
-            });
+            var response = StorageClient.GetObject(bucket:BucketName, objectName:filePath);
 
             var dirPath = GetDirPath(filePath);
             var dir = dirPath == null
                 ? RootDirectory
                 : GetParentDirectory(dirPath);
-            return new S3VirtualFile(this, dir).Init(response);
+            return new GoogleCloudVirtualFile(this, dir).Init(response);
         }
-        catch (AmazonS3Exception ex)
+        catch (GoogleApiException ex)
         {
-            if (ex.StatusCode == HttpStatusCode.NotFound)
+            if (ex.HttpStatusCode == HttpStatusCode.NotFound)
                 return null;
 
             throw;
         }
     }
 
-    protected S3VirtualDirectory GetParentDirectory(string dirPath)
+    protected GoogleCloudVirtualDirectory? GetParentDirectory(string dirPath)
     {
         if (string.IsNullOrEmpty(dirPath))
             return null;
-        
+
         var parentDirPath = GetDirPath(dirPath.TrimEnd(DirSep));
         var parentDir = parentDirPath != null
             ? GetParentDirectory(parentDirPath)
-            : (S3VirtualDirectory)RootDirectory;
-        return new S3VirtualDirectory(this, dirPath, parentDir);
+            : (GoogleCloudVirtualDirectory)RootDirectory;
+        return new GoogleCloudVirtualDirectory(this, dirPath, parentDir);
     }
 
-    public override IVirtualDirectory GetDirectory(string virtualPath)
+    public override IVirtualDirectory? GetDirectory(string? virtualPath)
     {
         if (virtualPath == null)
             return null;
@@ -93,17 +85,12 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
             ? dirPath + DirSep
             : dirPath;
 
-        var response = AmazonS3.ListObjects(new ListObjectsRequest
-        {
-            BucketName = BucketName,
-            Prefix = seekPath,
-            MaxKeys = 1,
-        });
+        PagedEnumerable<Objects, Object>? response = StorageClient.ListObjects(bucket:BucketName, prefix:seekPath);
 
-        if (response.S3Objects.Count == 0)
+        if (!response.Any())
             return null;
 
-        return new S3VirtualDirectory(this, dirPath, GetParentDirectory(dirPath));
+        return new GoogleCloudVirtualDirectory(this, dirPath, GetParentDirectory(dirPath));
     }
 
     public override bool DirectoryExists(string virtualPath)
@@ -118,22 +105,18 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
 
     public virtual void WriteFile(string filePath, string contents)
     {
-        AmazonS3.PutObject(new PutObjectRequest
-        {
-            Key = SanitizePath(filePath),
-            BucketName = BucketName,
-            ContentBody = contents,
-        });
+        using var ms = MemoryStreamFactory.GetStream();
+        MemoryProvider.Instance.WriteUtf8ToStream(contents, ms);
+        WriteFile(filePath, ms);
     }
 
     public virtual void WriteFile(string filePath, Stream stream)
     {
-        AmazonS3.PutObject(new PutObjectRequest
-        {
-            Key = SanitizePath(filePath),
-            BucketName = BucketName,
-            InputStream = stream,
-        });
+        StorageClient.UploadObject(
+            bucket: BucketName,
+            objectName: SanitizePath(filePath),
+            contentType: MimeTypes.GetMimeType(filePath),
+            source:stream);
     }
 
     public override async Task WriteFileAsync(string filePath, object contents, CancellationToken token = default)
@@ -143,21 +126,26 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
         var fileContents = await FileContents.GetAsync(contents, buffer);
         if (fileContents?.Stream != null)
         {
-            await AmazonS3.PutObjectAsync(new PutObjectRequest
-            {
-                Key = SanitizePath(filePath),
-                BucketName = BucketName,
-                InputStream = fileContents.Stream,
-            }, token).ConfigAwait();
+            await StorageClient.UploadObjectAsync(
+                bucket: BucketName,
+                objectName: SanitizePath(filePath),
+                contentType: MimeTypes.GetMimeType(filePath),
+                source:fileContents.Stream,
+                null, 
+                token).ConfigAwait();
         }
         else if (fileContents?.Text != null)
         {
-            await AmazonS3.PutObjectAsync(new PutObjectRequest
-            {
-                Key = SanitizePath(filePath),
-                BucketName = BucketName,
-                ContentBody = fileContents.Text,
-            }, token).ConfigAwait();
+            using var ms = MemoryStreamFactory.GetStream();
+            MemoryProvider.Instance.WriteUtf8ToStream(fileContents.Text, ms);
+            
+            await StorageClient.UploadObjectAsync(
+                bucket: BucketName,
+                objectName: SanitizePath(filePath),
+                contentType: MimeTypes.GetMimeType(filePath),
+                source:ms,
+                null, 
+                token).ConfigAwait();
         }
         else throw new NotSupportedException($"Unknown File Content Type: {contents.GetType().Name}");
 
@@ -172,39 +160,33 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
 
     public virtual void AppendFile(string filePath, string textContents)
     {
-        throw new NotImplementedException("S3 doesn't support appending to files");
+        throw new NotImplementedException("Google Cloud doesn't support appending to files");
     }
 
     public virtual void AppendFile(string filePath, Stream stream)
     {
-        throw new NotImplementedException("S3 doesn't support appending to files");
+        throw new NotImplementedException("Google Cloud doesn't support appending to files");
     }
 
     public virtual void DeleteFile(string filePath)
     {
-        AmazonS3.DeleteObject(new DeleteObjectRequest {
-            BucketName = BucketName,
-            Key = SanitizePath(filePath),
-        });
+        StorageClient.DeleteObject(
+            bucket:BucketName,
+            objectName:SanitizePath(filePath));
     }
 
     public virtual void DeleteFiles(IEnumerable<string> filePaths)
     {
+        //TODO: optimize when it's ever possible https://cloud.google.com/storage/docs/deleting-objects
         var batches = filePaths
             .BatchesOf(MultiObjectLimit);
-
+        
         foreach (var batch in batches)
         {
-            var request = new DeleteObjectsRequest {
-                BucketName = BucketName,
-            };
-
             foreach (var filePath in batch)
             {
-                request.AddKey(SanitizePath(filePath));
+                DeleteFile(filePath);
             }
-
-            AmazonS3.DeleteObjects(request);
         }
     }
 
@@ -224,58 +206,44 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
     }
 #endif    
 
-    public virtual IEnumerable<S3VirtualFile> EnumerateFiles(string prefix = null)
+    public virtual IEnumerable<GoogleCloudVirtualFile> EnumerateFiles(string? prefix = null)
     {
-        var response = AmazonS3.ListObjects(new ListObjectsRequest
-        {
-            BucketName = BucketName,
-            Prefix = prefix,
-        });
+        var response = StorageClient.ListObjects(bucket:BucketName, prefix:prefix);
 
-        foreach (var file in response.S3Objects)
+        foreach (var file in response)
         {
-            var filePath = SanitizePath(file.Key);
+            var filePath = SanitizePath(file.Name);
 
             var dirPath = GetDirPath(filePath);
-            yield return new S3VirtualFile(this, new S3VirtualDirectory(this, dirPath, GetParentDirectory(dirPath)))
+            yield return new GoogleCloudVirtualFile(this, new GoogleCloudVirtualDirectory(this, dirPath, GetParentDirectory(dirPath)))
             {
                 FilePath = filePath,
-                ContentLength = file.Size,
-                FileLastModified = file.LastModified,
+                ContentLength = (long)(file.Size ?? 0),
+                FileLastModified = file.Updated ?? DateTime.UtcNow,
                 Etag = file.ETag,
             };
         }
     }
 
 #if NET6_0_OR_GREATER
-    public virtual async IAsyncEnumerable<S3VirtualFile> EnumerateFilesAsync(string prefix = null, CancellationToken token = default)
+    public virtual async IAsyncEnumerable<GoogleCloudVirtualFile> EnumerateFilesAsync(string? prefix = null, CancellationToken token = default)
     {
-        ListObjectsV2Response response = null;
+        var response = StorageClient.ListObjectsAsync(
+            bucket:BucketName,
+            prefix:prefix);
 
-        while (true)
+        await foreach (var file in response)
         {
-            response = await AmazonS3.ListObjectsV2Async(new ListObjectsV2Request {
-                BucketName = BucketName,
-                Prefix = prefix,
-                ContinuationToken = response?.NextContinuationToken
-            }, token);
+            var filePath = SanitizePath(file.Name);
 
-            foreach (var file in response.S3Objects)
+            var dirPath = GetDirPath(filePath);
+            yield return new GoogleCloudVirtualFile(this, new GoogleCloudVirtualDirectory(this, dirPath, GetParentDirectory(dirPath)))
             {
-                var filePath = SanitizePath(file.Key);
-
-                var dirPath = GetDirPath(filePath);
-                yield return new S3VirtualFile(this, new S3VirtualDirectory(this, dirPath, GetParentDirectory(dirPath)))
-                {
-                    FilePath = filePath,
-                    ContentLength = file.Size,
-                    FileLastModified = file.LastModified,
-                    Etag = file.ETag,
-                };
-            }
-
-            if (!response.IsTruncated)
-                yield break;
+                FilePath = filePath,
+                ContentLength = (long)(file.Size ?? 0),
+                FileLastModified = file.Updated ?? DateTime.UtcNow,
+                Etag = file.ETag,
+            };
         }
     }
 #endif
@@ -286,10 +254,10 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
     }
 
 #if NET6_0_OR_GREATER
-    public IAsyncEnumerable<S3VirtualFile> GetAllFilesAsync(CancellationToken token=default) => EnumerateFilesAsync(token:token);
+    public IAsyncEnumerable<GoogleCloudVirtualFile> GetAllFilesAsync(CancellationToken token=default) => EnumerateFilesAsync(token:token);
 #endif
 
-    public virtual IEnumerable<S3VirtualDirectory> GetImmediateDirectories(string fromDirPath)
+    public virtual IEnumerable<GoogleCloudVirtualDirectory> GetImmediateDirectories(string fromDirPath)
     {
         var files = EnumerateFiles(fromDirPath);
         var dirPaths = files
@@ -299,11 +267,11 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
             .Where(x => x != null)
             .Distinct();
 
-        return dirPaths.Select(x => new S3VirtualDirectory(this, x, GetParentDirectory(x)));
+        return dirPaths.Select(x => new GoogleCloudVirtualDirectory(this, x, GetParentDirectory(x)));
     }
 
 #if NET6_0_OR_GREATER
-    public virtual IAsyncEnumerable<S3VirtualDirectory> GetImmediateDirectoriesAsync(string fromDirPath, CancellationToken token=default)
+    public virtual IAsyncEnumerable<GoogleCloudVirtualDirectory> GetImmediateDirectoriesAsync(string fromDirPath, CancellationToken token=default)
     {
         var dirPaths = EnumerateFilesAsync(fromDirPath, token)
             .Select(x => x.DirPath)
@@ -313,25 +281,25 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
             .Distinct();
 
         var parentDir = GetParentDirectory(fromDirPath);
-        return dirPaths.Select(x => new S3VirtualDirectory(this, x, parentDir));
+        return dirPaths.Select(x => new GoogleCloudVirtualDirectory(this, x, parentDir));
     }
 #endif
     
-    public virtual IEnumerable<S3VirtualFile> GetImmediateFiles(string fromDirPath)
+    public virtual IEnumerable<GoogleCloudVirtualFile> GetImmediateFiles(string fromDirPath)
     {
         return EnumerateFiles(fromDirPath)
             .Where(x => x.DirPath == fromDirPath);
     }
     
 #if NET6_0_OR_GREATER
-    public virtual IAsyncEnumerable<S3VirtualFile> GetImmediateFilesAsync(string fromDirPath, CancellationToken token=default)
+    public virtual IAsyncEnumerable<GoogleCloudVirtualFile> GetImmediateFilesAsync(string fromDirPath, CancellationToken token=default)
     {
         return EnumerateFilesAsync(fromDirPath, token)
             .Where(x => x.DirPath == fromDirPath);
     }
 #endif
 
-    public virtual string GetDirPath(string filePath)
+    public virtual string? GetDirPath(string filePath)
     {
         if (string.IsNullOrEmpty(filePath))
             return null;
@@ -342,7 +310,7 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
             : null;
     }
 
-    public virtual string GetImmediateSubDirPath(string fromDirPath, string subDirPath)
+    public virtual string? GetImmediateSubDirPath(string? fromDirPath, string subDirPath)
     {
         if (string.IsNullOrEmpty(subDirPath))
             return null;
@@ -357,12 +325,12 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
         if (!subDirPath.StartsWith(fromDirPath))
             return null;
 
-        return fromDirPath.CountOccurrencesOf(DirSep) == subDirPath.CountOccurrencesOf(DirSep) - 1
+        return fromDirPath.CountOccurrencesOf(DirSep) == subDirPath.CountOccurrencesOf(DirSep) - 1 
             ? subDirPath
             : null;
     }
 
-    public override string SanitizePath(string filePath)
+    public override string? SanitizePath(string filePath)
     {
         var sanitizedPath = string.IsNullOrEmpty(filePath)
             ? null
@@ -375,10 +343,7 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
     {
         return filePath.SplitOnLast(DirSep).Last();
     }
-}
-
-public partial class S3VirtualFiles : IS3Client
-{
+    
     public virtual void ClearBucket()
     {
         var allFilePaths = EnumerateFiles()
@@ -396,5 +361,4 @@ public partial class S3VirtualFiles : IS3Client
         DeleteFiles(allFilePaths);
     }
 #endif
-    
 }
