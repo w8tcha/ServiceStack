@@ -5,6 +5,8 @@ namespace ServiceStack.AI;
 
 public class NodeTypeChat : ITypeChat
 {
+    public Func<ProcessStartInfo, ProcessStartInfo>? ProcessFilter { get; set; }
+        
     public async Task<TypeChatResponse> TranslateMessageAsync(TypeChatRequest request, CancellationToken token = default)
     {
         var schemaPath = request.SchemaPath
@@ -24,9 +26,8 @@ public class NodeTypeChat : ITypeChat
             FileName = request.NodePath,
             Arguments = $"{scriptPath} {request.TypeChatTranslator} ./{schemaPath} \"{shellRequest}\"",
         };
-        if (Env.IsWindows)
-            processInfo = processInfo.ConvertToCmdExec();
-
+        processInfo = ProcessFilter?.Invoke(processInfo) ?? processInfo;
+        
         var sb = StringBuilderCache.Allocate();
         var sbError = StringBuilderCacheAlt.Allocate();
         await ProcessUtils.RunAsync(processInfo, request.NodeProcessTimeoutMs,
