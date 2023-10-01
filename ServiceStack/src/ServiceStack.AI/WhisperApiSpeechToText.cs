@@ -6,6 +6,11 @@ namespace ServiceStack.AI;
 public class WhisperApiSpeechToText : ISpeechToText, IRequireVirtualFiles
 {
     public IVirtualFiles? VirtualFiles { get; set; }
+    
+    public string BaseUri { get; set; } = "https://api.openai.com/v1";
+    
+    public string? ApiKey { get; set; }
+    
     public Task InitAsync(InitSpeechToText config, CancellationToken token = default) => Task.CompletedTask;
 
     public async Task<TranscriptResult> TranscribeAsync(string recordingPath, CancellationToken token = default)
@@ -16,14 +21,14 @@ public class WhisperApiSpeechToText : ISpeechToText, IRequireVirtualFiles
         var file = VirtualFiles.AssertFile(recordingPath);
         
         var client = new HttpClient();
-        client.DefaultRequestHeaders.Authorization = new("Bearer", Environment.GetEnvironmentVariable("OPENAI_API_KEY")!);
+        client.DefaultRequestHeaders.Authorization = new("Bearer", ApiKey ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY")!);
         using var body = new MultipartFormDataContent()
             .AddParam("model", "whisper-1")
             .AddParam("language", "en")
             .AddParam("response_format", "json")
             .AddFile("file", file);
 
-        var response = await client.PostAsync(new Uri("https://api.openai.com/v1/audio/transcriptions"), body, token).ConfigAwait();
+        var response = await client.PostAsync(new Uri(BaseUri + "/audio/transcriptions"), body, token).ConfigAwait();
         var resBody = await response.Content.ReadAsStringAsync().ConfigAwait();
         
         string? text = null;
