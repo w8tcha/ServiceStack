@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
@@ -24,9 +25,10 @@ public interface IIdentityApplicationAuthProvider
 /// <summary>
 /// Handles converting from Application Cookie ClaimsPrincipal into a ServiceStack Session
 /// </summary>
-public class IdentityApplicationAuthProvider<TUser> : IdentityAuthProvider<TUser>, 
+public class IdentityApplicationAuthProvider<TUser,TKey> : IdentityAuthProvider<TUser,TKey>, 
     IAuthWithRequest, IAuthPlugin, IIdentityApplicationAuthProvider
-    where TUser : IdentityUser
+    where TKey : IEquatable<TKey>
+    where TUser : IdentityUser<TKey>
 {
     public const string Name = AuthenticateService.IdentityProvider;
     public const string Realm = "/auth/" + AuthenticateService.IdentityProvider;
@@ -43,6 +45,8 @@ public class IdentityApplicationAuthProvider<TUser> : IdentityAuthProvider<TUser
     public string PermissionClaimType { get; set; } = JwtClaimTypes.Permissions;
 
     public CookieAuthenticationOptions Options { get; set; }
+    
+    public string IdClaimName { get; set; } = ClaimTypes.NameIdentifier;
 
     public Dictionary<string, string> MapClaimsToSession { get; set; } = new()
     {
@@ -98,8 +102,7 @@ public class IdentityApplicationAuthProvider<TUser> : IdentityAuthProvider<TUser
 
     public virtual async Task PreAuthenticateAsync(IRequest req, IResponse res)
     {
-        var coreReq = (HttpRequest)req.OriginalRequest;
-        var claimsPrincipal = coreReq.HttpContext.User;
+        var claimsPrincipal = req.GetClaimsPrincipal();
         if (claimsPrincipal.Identity?.IsAuthenticated != true)
             return;
 
@@ -110,7 +113,7 @@ public class IdentityApplicationAuthProvider<TUser> : IdentityAuthProvider<TUser
         string source;
         string sessionId;
 
-        var idClaim = claimsPrincipal.Claims.FirstOrDefault(x => x.Type == ClaimTypes.Name);
+        var idClaim = claimsPrincipal.Claims.FirstOrDefault(x => x.Type == IdClaimName);
         if (idClaim != null)
         {
             sessionId = idClaim.Value;
@@ -124,7 +127,7 @@ public class IdentityApplicationAuthProvider<TUser> : IdentityAuthProvider<TUser
                 sessionId = clientIdClaim.Value;
                 source = JwtClaimTypes.ClientId;
             }
-            else throw new NotSupportedException($"Claim '{ClaimTypes.Name}' is required");
+            else throw new NotSupportedException($"Claim '{IdClaimName}' is required");
         }
 
         session = SessionFeature.CreateNewSession(req, sessionId);
@@ -135,6 +138,9 @@ public class IdentityApplicationAuthProvider<TUser> : IdentityAuthProvider<TUser
     
     public virtual void PopulateSession(IRequest req, IAuthSession session, ClaimsPrincipal claimsPrincipal, string? source = null)
     {
+        if (claimsPrincipal == null)
+            throw new ArgumentNullException(nameof(claimsPrincipal));
+
         if (session is IRequireClaimsPrincipal sessionClaims)
             sessionClaims.User = claimsPrincipal;
 
