@@ -27,7 +27,7 @@ namespace ServiceStack.WebHost.Endpoints.Tests
                 nameof(AuthenticateService.Options),
                 nameof(AuthenticateService.GetAsync),
                 nameof(AuthenticateService.PostAsync),
-                nameof(AuthenticateService.DeleteAsync),
+                nameof(AuthenticateService.AnyAsync),
             });
             Assert.That(verbs, Is.EquivalentTo(expected));
         }

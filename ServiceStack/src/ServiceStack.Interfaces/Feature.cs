@@ -28,9 +28,10 @@ public enum Feature : int
     Razor        = 1 << 12,
     ProtoBuf     = 1 << 13,
     MsgPack      = 1 << 14,
-    Wire         = 1 << 15,
+    Jsonl        = 1 << 15,
     Grpc         = 1 << 16,
 
     ServiceDiscovery = 1 << 17,
     Validation   = 1 << 18,
+    ApiExplorer  = 1 << 19, // API Explorer, Open API, etc
 }

@@ -422,7 +422,7 @@ namespace ServiceStack.Host
 
         public bool HasImplementation(Operation operation, Format format)
         {
-            if (format == Format.Soap11 || format == Format.Soap12)
+            if (format is Format.Soap11 or Format.Soap12)
             {
                 if (operation.Actions == null) return false;
 
@@ -456,6 +456,23 @@ namespace ServiceStack.Host
             {
                 AddReferencedTypes(to, op.RequestType);
                 AddReferencedTypes(to, op.ResponseType);
+            }
+            return allDtos = to;
+        }
+
+        public HashSet<Type> GetDtoTypes(Func<Type,bool> include)
+        {
+            if (allDtos != null)
+                return allDtos;
+            
+            var to = new HashSet<Type>();
+            var ops = OperationsMap.Values;
+            foreach (var op in ops)
+            {
+                if (!include(op.RequestType))
+                    continue;
+                AddReferencedTypes(to, op.RequestType, include);
+                AddReferencedTypes(to, op.ResponseType, include);
             }
             return allDtos = to;
         }
@@ -514,7 +531,7 @@ namespace ServiceStack.Host
             if (route == null)
                 throw new ArgumentException($"No matching route found for path {method} '{pathInfo}'");
 
-            Dictionary<string, string> query = null;
+            Dictionary<string, string>? query = null;
             if (parts.Length == 2)
             {
                 query = new Dictionary<string, string>();
@@ -532,17 +549,18 @@ namespace ServiceStack.Host
             return requestDto;
         }
 
-        public static void AddReferencedTypes(HashSet<Type> to, Type? type)
+        public static void AddReferencedTypes(HashSet<Type> to, Type? type) => AddReferencedTypes(to, type, IsDtoType);
+        public static void AddReferencedTypes(HashSet<Type> to, Type? type, Func<Type,bool> include)
         {
-            if (type == null || to.Contains(type) || !IsDtoType(type))
+            if (type == null || to.Contains(type) || !include(type))
                 return;
 
             to.Add(type);
 
             var baseType = type.BaseType;
-            if (baseType != null && IsDtoType(baseType) && !to.Contains(baseType))
+            if (baseType != null && include(baseType) && !to.Contains(baseType))
             {
-                AddReferencedTypes(to, baseType);
+                AddReferencedTypes(to, baseType, include);
 
                 var genericArgs = type.IsGenericType
                     ? type.GetGenericArguments()
@@ -550,17 +568,17 @@ namespace ServiceStack.Host
 
                 foreach (var arg in genericArgs)
                 {
-                    AddReferencedTypes(to, arg);
+                    AddReferencedTypes(to, arg, include);
                 }
             }
 
             foreach (var iface in type.GetInterfaces())
             {
-                if (iface.IsGenericType && !iface.IsGenericTypeDefinition)
+                if (iface is { IsGenericType: true, IsGenericTypeDefinition: false })
                 {
                     foreach (var arg in iface.GetGenericArguments())
                     {
-                        AddReferencedTypes(to, arg);
+                        AddReferencedTypes(to, arg, include);
                     }
                 }
             }
@@ -570,8 +588,8 @@ namespace ServiceStack.Host
                 if (to.Contains(pi.PropertyType))
                     continue;
                 
-                if (IsDtoType(pi.PropertyType))
-                    to.Add(pi.PropertyType);
+                if (include(pi.PropertyType))
+                    AddReferencedTypes(to, pi.PropertyType, include);
 
                 var genericArgs = pi.PropertyType.IsGenericType
                     ? pi.PropertyType.GetGenericArguments()
@@ -581,13 +599,13 @@ namespace ServiceStack.Host
                 {
                     foreach (var arg in genericArgs)
                     {
-                        AddReferencedTypes(to, arg);
+                        AddReferencedTypes(to, arg, include);
                     }
                 }
                 else if (pi.PropertyType.IsArray)
                 {
                     var elType = pi.PropertyType.HasElementType ? pi.PropertyType.GetElementType() : null;
-                    AddReferencedTypes(to, elType);
+                    AddReferencedTypes(to, elType, include);
                 }
             }
         }
@@ -595,7 +613,6 @@ namespace ServiceStack.Host
         public static bool IsDtoType(Type? type) => type != null &&
             type.Namespace?.StartsWith("System") == false &&
             type.IsClass && type != typeof(string) &&
-            !type.IsGenericType &&
             !type.IsArray &&
             !type.HasInterface(typeof(IService));
 
