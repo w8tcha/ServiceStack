@@ -14,43 +14,50 @@ using ServiceStack.Metadata;
 using ServiceStack.NativeTypes;
 using ServiceStack.Web;
 
+#if NET8_0_OR_GREATER
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+#endif
+
 namespace ServiceStack;
 
 public class MetadataFeature : IPlugin, Model.IHasStringId, IPreInitPlugin
 {
     public string Id { get; set; } = Plugins.Metadata;
-    public string PluginLinksTitle { get; set; }
-    public Dictionary<string, string> PluginLinks { get; set; }
+    public string PluginLinksTitle { get; set; } = "Plugin Links:";
+    public Dictionary<string, string> PluginLinks { get; set; } = new();
 
-    public string DebugLinksTitle { get; set; }
-    public Dictionary<string, string> DebugLinks { get; set; }
+    public string DebugLinksTitle { get; set; } = "Debug Info:";
+    public Dictionary<string, string> DebugLinks { get; set; } = new()
+    {
+        ["operations/metadata"] = "Operations Metadata",
+    };
 
     public Action<IndexOperationsControl> IndexPageFilter { get; set; }
     public Action<OperationControl> DetailPageFilter { get; set; }
         
-    public List<Action<AppMetadata>> AppMetadataFilters { get; } = new();
-    public List<Action<IRequest,AppMetadata>> AfterAppMetadataFilters { get; } = new() {
-        MetadataUtils.LocalizeMetadata,
-    };
+    public List<Action<AppMetadata>> AppMetadataFilters { get; } = [];
+    public List<Action<IRequest,AppMetadata>> AfterAppMetadataFilters { get; } = [
+        MetadataUtils.LocalizeMetadata
+    ];
 
     public bool ShowResponseStatusInMetadataPages { get; set; }
         
     /// <summary>
     /// Export built-in Types so they're available from /metadata/app
     /// </summary>
-    public List<Type> ExportTypes { get; } = new() {
-        typeof(AuditBase),
-    };
+    public List<Type> ExportTypes { get; } = [ typeof(AuditBase) ];
         
     public Dictionary<Type, string[]> ServiceRoutes { get; set; } = new() {
-        { typeof(MetadataAppService), new[]
-        {
-            "/" + "metadata".Localize() + "/" + "app".Localize(),
-        } },
-        { typeof(MetadataNavService), new[] {
+        [typeof(MetadataAppService)] = [
+            "/" + "metadata".Localize() + "/" + "app".Localize()
+        ],
+        [typeof(MetadataNavService)] = [
             "/" + "metadata".Localize() + "/" + "nav".Localize(),
-            "/" + "metadata".Localize() + "/" + "nav".Localize() + "/{Name}",
-        } },
+            "/" + "metadata".Localize() + "/" + "nav".Localize() + "/{Name}"
+        ],
     };
 
     public HtmlModule HtmlModule { get; set; } = new("/modules/ui", "/ui") {
@@ -79,17 +86,6 @@ public class MetadataFeature : IPlugin, Model.IHasStringId, IPreInitPlugin
 
     public Func<string,string> TagFilter { get; set; }
 
-    public MetadataFeature()
-    {
-        PluginLinksTitle = "Plugin Links:";
-        PluginLinks = new Dictionary<string, string>();
-
-        DebugLinksTitle = "Debug Info:";
-        DebugLinks = new Dictionary<string, string> {
-            {"operations/metadata", "Operations Metadata"},
-        };
-    }
-
     public void BeforePluginsLoaded(IAppHost appHost)
     {
         if (HtmlModule != null)
@@ -106,19 +102,65 @@ public class MetadataFeature : IPlugin, Model.IHasStringId, IPreInitPlugin
 
     public void Register(IAppHost appHost)
     {
-        appHost.CatchAllHandlers.Add(ProcessRequest);
-
         if (EnableNav)
         {
             ViewUtils.Load(appHost.AppSettings);
         }
 
         appHost.RegisterServices(ServiceRoutes);
+
+        appHost.CatchAllHandlers.Add(GetHandler);
+        
+#if NET8_0_OR_GREATER
+        var host = (AppHostBase)appHost;
+        host.MapEndpoints(routeBuilder =>
+        {
+            var tag = GetType().Name;
+            routeBuilder.MapGet("/metadata", httpContext => httpContext.ProcessRequestAsync(new IndexMetadataHandler()))
+                .WithMetadata<string>(name:nameof(IndexMetadataHandler), tag:tag, contentType:MimeTypes.Html);
+            
+            routeBuilder.MapGet("/json/metadata", httpContext => httpContext.ProcessRequestAsync(new JsonMetadataHandler()))
+                .WithMetadata<string>(name:nameof(JsonMetadataHandler), tag:tag, contentType:MimeTypes.Html);
+            
+            routeBuilder.MapGet("/xml/metadata", httpContext => httpContext.ProcessRequestAsync(new XmlMetadataHandler()))
+                .WithMetadata<string>(name:nameof(XmlMetadataHandler), tag:tag, contentType:MimeTypes.Html);
+            
+            routeBuilder.MapGet("/jsv/metadata", httpContext => httpContext.ProcessRequestAsync(new JsvMetadataHandler()))
+                .WithMetadata<string>(name:nameof(JsvMetadataHandler), tag:tag, contentType:MimeTypes.Html);
+
+            var operationsHandler = new CustomResponseHandler((httpReq, httpRes) =>
+                HostContext.AppHost.HasAccessToMetadata(httpReq, httpRes)
+                    ? HostContext.Metadata.GetOperationDtos()
+                    : null, "Operations Metadata");
+            
+            routeBuilder.MapGet("/operations/metadata", httpContext => httpContext.ProcessRequestAsync(operationsHandler))
+                .WithMetadata<List<OperationDto>>(name:"Operations Metadata", tag:tag, contentType:MimeTypes.Json);
+            routeBuilder.MapGet("/operations/metadata.{format}", (string format, HttpContext httpContext) => {
+                    return httpContext.ProcessRequestAsync(operationsHandler, 
+                        configure:req => req.ResponseContentType = HostContext.ContentTypes.GetFormatContentType(format));
+                })
+                .WithMetadata<string>(name:"Operations Metadata format", tag:tag);
+            
+            routeBuilder.MapGet("/{format}/metadata", (string format, HttpContext httpContext) =>
+                {
+                    if (format.IndexOf(' ') >= 0)
+                        format = format.Replace(' ', '+'); //Convert 'x-custom csv' -> 'x-custom+csv'
+                    if (appHost.ContentTypes.ContentTypeFormats.TryGetValue(format, out var contentType))
+                    {
+                        format = ContentFormat.GetContentFormat(contentType);
+                        return httpContext.ProcessRequestAsync(new CustomMetadataHandler(contentType, format));
+                    }
+                    return Task.CompletedTask;
+                })
+                .WithMetadata<string>(name:nameof(CustomMetadataHandler), tag:tag, contentType:MimeTypes.Html);
+        });
+#endif
+        
     }
 
-    public virtual IHttpHandler ProcessRequest(string httpMethod, string pathInfo, string filePath)
+    public virtual IHttpHandler GetHandler(IRequest req)
     {
-        var pathParts = pathInfo.TrimStart('/').Split('/');
+        var pathParts = req.PathInfo.TrimStart('/').Split('/');
         if (pathParts.Length == 0) return null;
         return GetHandlerForPathParts(pathParts);
     }
