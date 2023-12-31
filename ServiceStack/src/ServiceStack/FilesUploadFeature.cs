@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using ServiceStack.Auth;
 using ServiceStack.Configuration;
 using ServiceStack.Host;
@@ -15,7 +16,7 @@ using ServiceStack.Web;
 
 namespace ServiceStack;
 
-public class FilesUploadFeature : IPlugin, IHasStringId, IPreInitPlugin
+public class FilesUploadFeature : IPlugin, IConfigureServices, IHasStringId, IPreInitPlugin
 {
     public string Id => Plugins.FileUpload;
     public UploadLocation[] Locations { get; set; }
@@ -57,16 +58,19 @@ public class FilesUploadFeature : IPlugin, IHasStringId, IPreInitPlugin
         });
     }
 
+    public void Configure(IServiceCollection services)
+    {
+        services.RegisterService(typeof(StoreFileUploadService),   [BasePath, BasePath.CombineWith("{Name}")]);
+        services.RegisterService(typeof(GetFileUploadService),     [BasePath, BasePath.CombineWith("{Name}/{Path*}")]);
+        services.RegisterService(typeof(ReplaceFileUploadService), [BasePath, BasePath.CombineWith("{Name}/{Path*}")]);
+        services.RegisterService(typeof(DeleteFileUploadService),  [BasePath, BasePath.CombineWith("{Name}/{Path*}")]);
+    }
+
     public void Register(IAppHost appHost)
     {
-        appHost.RegisterService(typeof(StoreFileUploadService),   BasePath, BasePath.CombineWith("{Name}"));
-        appHost.RegisterService(typeof(GetFileUploadService),     BasePath, BasePath.CombineWith("{Name}/{Path*}"));
-        appHost.RegisterService(typeof(ReplaceFileUploadService), BasePath, BasePath.CombineWith("{Name}/{Path*}"));
-        appHost.RegisterService(typeof(DeleteFileUploadService),  BasePath, BasePath.CombineWith("{Name}/{Path*}"));
-
         if (Locations.Length == 0)
         {
-            Locations = new[] { new UploadLocation("default", appHost.VirtualFiles) };
+            Locations = [new UploadLocation("default", appHost.VirtualFiles)];
         }
         
         appHost.AddToAppMetadata(meta =>
@@ -314,16 +318,10 @@ public class DeleteFileUploadService : Service
     }
 }
 
-public readonly struct ResolvedPath
+public readonly struct ResolvedPath(string publicPath, string virtualPath)
 {
-    public string PublicPath { get; }
-    public string VirtualPath { get; }
-
-    public ResolvedPath(string publicPath, string virtualPath)
-    {
-        PublicPath = publicPath;
-        VirtualPath = virtualPath;
-    }
+    public string PublicPath { get; } = publicPath;
+    public string VirtualPath { get; } = virtualPath;
 }
 
 public readonly struct FilesUploadContext

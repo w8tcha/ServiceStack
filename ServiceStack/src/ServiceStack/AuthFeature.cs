@@ -243,12 +243,13 @@ public class AuthFeature : IPlugin, IPostInitPlugin, Model.IHasStringId
     /// <returns></returns>
     public AuthFeature AddAuthenticateAliasRoutes()
     {
-        ServiceRoutes[typeof(AuthenticateService)] = new[] {
+        ServiceRoutes[typeof(AuthenticateService)] =
+        [
             "/" + LocalizedStrings.Auth.Localize(),
             "/" + LocalizedStrings.Auth.Localize() + "/{provider}",
             "/" + LocalizedStrings.Authenticate.Localize(),
-            "/" + LocalizedStrings.Authenticate.Localize() + "/{provider}",
-        };
+            "/" + LocalizedStrings.Authenticate.Localize() + "/{provider}"
+        ];
         return this;
     }
 
@@ -262,27 +263,26 @@ public class AuthFeature : IPlugin, IPostInitPlugin, Model.IHasStringId
         OnBeforeInit.Add(configure);
     }
         
-    public AuthFeature(IAuthProvider authProvider) : this(() => new AuthUserSession(), new []{ authProvider }) {}
+    public AuthFeature(IAuthProvider authProvider) : this(() => new AuthUserSession(), [authProvider]) {}
     public AuthFeature(IEnumerable<IAuthProvider> authProviders) : this(() => new AuthUserSession(), authProviders.ToArray()) {}
     public AuthFeature(Func<IAuthSession> sessionFactory, IAuthProvider[] authProviders, string htmlRedirect = null)
     {
-        this.SessionFactory = sessionFactory;
+        this.SessionFactory = sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory));
         this.SessionType = sessionFactory().GetType();
         this.authProviders = authProviders;
 
         ServiceRoutes = new Dictionary<Type, string[]> {
-            { typeof(AuthenticateService), [
-                    "/" + LocalizedStrings.Auth.Localize(),
-                    "/" + LocalizedStrings.Auth.Localize() + "/{provider}"
-                ]
-            },
-            { typeof(AssignRolesService), ["/" + LocalizedStrings.AssignRoles.Localize()] },
-            { typeof(UnAssignRolesService), ["/" + LocalizedStrings.UnassignRoles.Localize()] },
+            [typeof(AuthenticateService)] = [
+                "/" + LocalizedStrings.Auth.Localize(),
+                "/" + LocalizedStrings.Auth.Localize() + "/{provider}"
+            ],
+            [typeof(AssignRolesService)] = ["/" + LocalizedStrings.AssignRoles.Localize()],
+            [typeof(UnAssignRolesService)] = ["/" + LocalizedStrings.UnassignRoles.Localize()],
         };
         ServiceRoutesVerbs = new()
         {
             ["/" + LocalizedStrings.Auth.Localize()] = "GET,POST",
-            ["/" + LocalizedStrings.Auth.Localize() + "/{provider}"] = "POST",
+            ["/" + LocalizedStrings.Auth.Localize() + "/{provider}"] = "GET,POST",
         };
 
         this.HtmlRedirect = htmlRedirect ?? "~/" + LocalizedStrings.Login.Localize();
