@@ -55,17 +55,20 @@ public static class IdentityAuth
             // Always remove IAuthRepo Services
             authFeature.IncludeAssignRoleServices = false;
 
+            // GET /oauth-provider not needed when using ASP.NET Identity Auth
+            authFeature.ServiceRoutesVerbs["/" + LocalizedStrings.Auth.Localize() + "/{provider}"] = "POST";
+
             if (ctx.IncludeAssignRoleServices)
             {
                 authFeature.ServiceRoutes[typeof(IdentityAssignRolesService<TUser, TKey>)] =
-                    new[] { "/" + LocalizedStrings.AssignRoles.Localize() };
+                    ["/" + LocalizedStrings.AssignRoles.Localize()];
                 authFeature.ServiceRoutes[typeof(IdentityUnAssignRolesService<TUser, TKey>)] =
-                    new[] { "/" + LocalizedStrings.UnassignRoles.Localize() };
+                    ["/" + LocalizedStrings.UnassignRoles.Localize()];
             }
             if (ctx.IncludeRegisterService)
             {
                 authFeature.ServiceRoutes[typeof(IdentityRegisterService<TUser, TKey>)] =
-                    new[] { "/" + "register".Localize() };
+                    ["/" + "register".Localize()];
                 HostContext.Container.RegisterAs<IdentityRegistrationValidator<TUser, TKey>, IValidator<Register>>();
             }
 
