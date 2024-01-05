@@ -22,7 +22,16 @@ public interface IConfigureServices
 /// </summary>
 public interface IPostConfigureServices 
 {
+    public int Priority { get; }
+    
     void AfterConfigure(IServiceCollection services);
+}
+
+public static class ConfigurePriority
+{
+    public const int AutoQueryDataFeature = 10;
+    public const int AutoQueryFeature = 20;
+    public const int ValidationFeature = 100;
 }
 
 public static class ServiceCollectionExtensions
@@ -75,7 +84,7 @@ public static class ServiceCollectionExtensions
         {
             AssertServiceType(entry.Key);
             
-            ServiceStackHost.GlobalServiceRoutes[entry.Key] = entry.Value;
+            ServiceStackHost.InitOptions.ServiceRoutes[entry.Key] = entry.Value;
         }
     }
 
@@ -85,18 +94,37 @@ public static class ServiceCollectionExtensions
     public static void RegisterService(this IServiceCollection services, Type serviceType)
     {
         AssertServiceType(serviceType);
-        ServiceStackHost.GlobalServices.AddIfNotExists(serviceType);
+        ServiceStackHost.InitOptions.ServiceTypes.AddIfNotExists(serviceType);
     }
 
     public static void RegisterService(this IServiceCollection services, Type serviceType, string route)
     {
         AssertServiceType(serviceType);
-        ServiceStackHost.GlobalServiceRoutes[serviceType] = [route];
+        ServiceStackHost.InitOptions.ServiceRoutes[serviceType] = [route];
     }
 
     public static void RegisterService(this IServiceCollection services, Type serviceType, string[] routes)
     {
         AssertServiceType(serviceType);
-        ServiceStackHost.GlobalServiceRoutes[serviceType] = routes;
+        ServiceStackHost.InitOptions.ServiceRoutes[serviceType] = routes;
     }
+    
+    public static void AddPlugin<T>(this IServiceCollection services, T plugin) where T : IPlugin
+    {
+#if NETCORE
+        ServiceStackHost.InitOptions.Plugins.AddIfNotExists(plugin);
+#else
+        HostContext.AssertAppHost().Plugins.AddIfNotExists(plugin);
+#endif
+    }
+
+    public static void ConfigureScriptContext(this IServiceCollection services, Action<Script.ScriptContext> configure)
+    {
+#if NETCORE
+        configure(ServiceStackHost.InitOptions.ScriptContext);
+#else
+        configure(HostContext.AssertAppHost().ScriptContext);
+#endif
+    }
+    
 }

@@ -18,20 +18,21 @@ public static class DtoUtils
     public static ResponseStatus CreateResponseStatus(Exception ex, object request = null, bool debugMode = false)
     {
         var e = ex.UnwrapIfSingleException();
+        var responseStatus = (e is IResponseStatusConvertible customStatus ? customStatus.ToResponseStatus() : null) 
+            ?? ServiceStackHost.Instance?.CreateResponseStatus(e, request)
+            ?? ResponseStatusUtils.CreateResponseStatus(e.GetType().Name, e.Message);
             
-        var responseStatus = (e is IResponseStatusConvertible customStatus
-            ? customStatus.ToResponseStatus()
-            : null) ?? ResponseStatusUtils.CreateResponseStatus(e.GetType().Name, e.Message);
-            
-        if (responseStatus == null)
-            return null;
+        return responseStatus == null ? null : PopulateResponseStatus(responseStatus, request, e, debugMode);
+    }
 
+    public static ResponseStatus PopulateResponseStatus(ResponseStatus responseStatus, object request, Exception e, bool debugMode = false)
+    {
         if (debugMode)
         {
 #if !NETCORE
-                if (ex is System.Web.HttpCompileException compileEx && compileEx.Results.Errors.HasErrors)
+                if (e is System.Web.HttpCompileException compileEx && compileEx.Results.Errors.HasErrors)
                 {
-                    responseStatus.Errors ??= new List<ResponseError>();
+                    responseStatus.Errors ??= [];
                     foreach (var err in compileEx.Results.Errors)
                     {
                         responseStatus.Errors.Add(new ResponseError { Message = err.ToString() });

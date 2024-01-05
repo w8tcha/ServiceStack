@@ -736,13 +736,15 @@ public abstract partial class ServiceStackHost
     /// </summary>
     public virtual ResponseStatus CreateResponseStatus(Exception ex, object request=null)
     {
-        var useEx = UseException(ex);
-        var responseStatus = DtoUtils.CreateResponseStatus(useEx, request, Config.DebugMode);
-
-        OnExceptionTypeFilter(useEx, responseStatus);
+        var e = UseException(ex.UnwrapIfSingleException());
+        var responseStatus = (e is IResponseStatusConvertible customStatus ? customStatus.ToResponseStatus() : null) 
+                             ?? ResponseStatusUtils.CreateResponseStatus(e.GetType().Name, e.Message);
+        DtoUtils.PopulateResponseStatus(responseStatus, request, ex, Config.DebugMode);
+        
+        OnExceptionTypeFilter(e, responseStatus);
 
         if (Config.DebugMode || Log.IsDebugEnabled)
-            OnLogError(GetType(), responseStatus.Message, useEx);
+            OnLogError(GetType(), responseStatus.Message, e);
             
         return responseStatus;
     }

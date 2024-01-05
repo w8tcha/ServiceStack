@@ -8,6 +8,7 @@ using System.Runtime.Serialization;
 using System.Threading.Tasks;
 using System.Web;
 using Funq;
+using Microsoft.Extensions.DependencyInjection;
 using ServiceStack.Auth;
 using ServiceStack.Caching;
 using ServiceStack.Configuration;
@@ -181,7 +182,7 @@ public static class HostContext
         var appHost = AppHost;
         return appHost != null
             ? appHost.GetPlugin<T>()
-            : ServiceStackHost.GlobalPluginsToLoad.FirstOrDefault(x => x is T) as T;
+            : ServiceStackHost.InitOptions.Plugins.FirstOrDefault(x => x is T) as T;
     }
 
     public static bool HasPlugin<T>() where T : class, IPlugin
@@ -349,6 +350,12 @@ public static class HostContext
 
         return -1;
     }
+
+    public static void ConfigureServices(Action<IServiceCollection> configure)
+    {
+        if (configure != null)
+            ServiceStackHost.GlobalAfterConfigureServices.Add(configure);
+    }
         
     public static void ConfigureAppHost(
         Action<ServiceStackHost> beforeConfigure = null,
@@ -368,16 +375,11 @@ public static class HostContext
 
     public static void Reset()
     {
+        ServiceStackHost.GlobalAfterConfigureServices.Clear();
         ServiceStackHost.GlobalBeforeConfigure.Clear();
         ServiceStackHost.GlobalAfterConfigure.Clear();
         ServiceStackHost.GlobalAfterPluginsLoaded.Clear();
         ServiceStackHost.GlobalAfterAppHostInit.Clear();
-        ServiceStackHost.GlobalPluginsToLoad.Clear();
-        ServiceStackHost.GlobalPluginsToLoad.AddRange(ServiceStackHost.DefaultPluginsToLoad());
-        ServiceStackHost.GlobalPluginsConfigured.Clear();
-        ServiceStackHost.GlobalServicesRegistered.Clear();
-        ServiceStackHost.GlobalServiceAssemblies.Clear();
-        ServiceStackHost.GlobalServices.Clear();
-        ServiceStackHost.GlobalServiceRoutes.Clear();
+        ServiceStackHost.InitOptions = new();
     }
 }

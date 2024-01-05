@@ -58,7 +58,7 @@ public class ServiceController : IServiceController
         this.Register(typeFactory);
 
         appHost.Container.RegisterAutoWiredTypes(appHost.Metadata.ServiceTypes);
-        ServiceStackHost.GlobalServicesRegistered.AddDistinctRange(appHost.Metadata.ServiceTypes);
+        ServiceStackHost.InitOptions.ServicesRegistered.AddDistinctRange(appHost.Metadata.ServiceTypes);
 
         return this;
     }
@@ -75,7 +75,7 @@ public class ServiceController : IServiceController
     {
         try
         {
-            if (ServiceStackHost.GlobalServicesRegistered.Contains(serviceType))
+            if (ServiceStackHost.InitOptions.ServicesRegistered.Contains(serviceType))
             {
                 LogManager.GetLogger(GetType()).WarnFormat("'{0}' Service has already been registered", serviceType.Name);
                 return;
@@ -86,7 +86,7 @@ public class ServiceController : IServiceController
                 
             RegisterService(typeFactory, serviceType);
             appHost.Container.RegisterAutoWiredType(serviceType);
-            ServiceStackHost.GlobalServicesRegistered.Add(serviceType);
+            ServiceStackHost.InitOptions.ServicesRegistered.Add(serviceType);
         }
         catch (Exception ex)
         {
@@ -167,6 +167,16 @@ public class ServiceController : IServiceController
         }
     }
 
+    public static bool IsRequestType(Type type)
+    {
+        return !type.IsValueType
+               && type != typeof(string)
+               && !type.IsAbstract 
+               && !type.IsGenericTypeDefinition 
+               && !type.ContainsGenericParameters
+               && !type.IsGenericParameter;
+    }
+
     public static bool IsServiceType(Type serviceType)
     {
         return typeof(IService).IsAssignableFrom(serviceType)
@@ -185,10 +195,7 @@ public class ServiceController : IServiceController
 
     public static bool IsServiceAction(string actionName, Type requestType)
     {
-        if (requestType.IsValueType || requestType == typeof(string))
-            return false;
-
-        return IsServiceAction(actionName);
+        return IsRequestType(requestType) && IsServiceAction(actionName);
     }
 
     public static bool IsServiceAction(string actionName)
