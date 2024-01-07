@@ -1,37 +1,39 @@
 ﻿#nullable enable
 #if NETCORE
 
+
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Threading;
 using System.Threading.Tasks;
-using ServiceStack.Web;
-using ServiceStack.Logging;
-using ServiceStack.NetCore;
-using ServiceStack.Host;
-using ServiceStack.Host.NetCore;
-using ServiceStack.Host.Handlers;
+using Funq;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using ServiceStack.Configuration;
-using ServiceStack.IO;
-using ServiceStack.Text;
-using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-
+using ServiceStack.Caching;
+using ServiceStack.Configuration;
+using ServiceStack.Host;
+using ServiceStack.Host.Handlers;
+using ServiceStack.Host.NetCore;
+using ServiceStack.IO;
+using ServiceStack.Logging;
+using ServiceStack.Messaging;
+using ServiceStack.NetCore;
+using ServiceStack.Platforms;
+using ServiceStack.Redis;
+using ServiceStack.Text;
+using ServiceStack.Web;
 #if NETSTANDARD2_0
 using IHostApplicationLifetime = Microsoft.AspNetCore.Hosting.IApplicationLifetime;
 using IWebHostEnvironment = Microsoft.AspNetCore.Hosting.IHostingEnvironment;
 #else
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Hosting;
-using ServiceStack.Script;
 using IWebHostEnvironment = Microsoft.AspNetCore.Hosting.IWebHostEnvironment;
 using IHostApplicationLifetime = Microsoft.Extensions.Hosting.IHostApplicationLifetime;
 #endif
@@ -43,7 +45,7 @@ public abstract class AppHostBase : ServiceStackHost, IAppHostNetCore, IConfigur
     protected AppHostBase(string serviceName, params Assembly[] assembliesWithServices)
         : base(serviceName, assembliesWithServices)
     {
-        Platforms.PlatformNetCore.HostInstance = this;
+        PlatformNetCore.HostInstance = this;
 
         //IIS Mapping / sometimes UPPER CASE https://serverfault.com/q/292335
         var iisPathBase = Environment.GetEnvironmentVariable("ASPNETCORE_APPL_PATH");
@@ -85,7 +87,7 @@ public abstract class AppHostBase : ServiceStackHost, IAppHostNetCore, IConfigur
     /// and register services in ConfigureServices(IServiceCollection)
     /// </summary>
     /// <param name="container"></param>
-    public override void Configure(Funq.Container container) => Configure();
+    public override void Configure(Container container) => Configure();
 
     public virtual void Configure() {}
 
@@ -124,8 +126,11 @@ public abstract class AppHostBase : ServiceStackHost, IAppHostNetCore, IConfigur
         var configuration = app.ApplicationServices.GetService<IConfiguration>();
         if (configuration != null)
         {
+            // Can be registered in services.AddServiceStack()
+            var appSettings = app.ApplicationServices.GetService<IAppSettings>()
+                ?? new NetCoreAppSettings(configuration);
             if (appHost.AppSettings is AppSettings) // override if default
-                appHost.AppSettings = new NetCoreAppSettings(configuration);
+                appHost.AppSettings = appSettings;
         }
         else
         {
@@ -174,11 +179,9 @@ public abstract class AppHostBase : ServiceStackHost, IAppHostNetCore, IConfigur
             //Initialize VFS
             Config.WebHostPhysicalPath = HostingEnvironment.ContentRootPath;
 
-            if (VirtualFiles == null)
-            {
-                //Set VirtualFiles to point to ContentRootPath (Project Folder)
-                VirtualFiles = new FileSystemVirtualFiles(HostingEnvironment.ContentRootPath);
-            }
+            //Set VirtualFiles to point to ContentRootPath (Project Folder)
+            VirtualFiles ??= ApplicationServices.GetService<IVirtualFiles>()
+                         ?? new FileSystemVirtualFiles(HostingEnvironment.ContentRootPath);
 
             RegisterLicenseFromAppSettings(AppSettings);
         }
@@ -250,7 +253,7 @@ public abstract class AppHostBase : ServiceStackHost, IAppHostNetCore, IConfigur
         }
         if (operation.RequiresAuthentication)
         {
-            var authAttr = operation.Authorize ?? new AuthorizeAttribute();
+            var authAttr = operation.Authorize ?? new Microsoft.AspNetCore.Authorization.AuthorizeAttribute();
             authAttr.AuthenticationSchemes ??= Options.AuthenticationSchemes;
             builder.RequireAuthorization(authAttr);
         }
@@ -306,31 +309,42 @@ public abstract class AppHostBase : ServiceStackHost, IAppHostNetCore, IConfigur
                     ? [operation.Method]
                     : route.Verbs;
 
-                foreach (var routeVerb in routeVerbs)
+                string? routeRule = null;
+                try
                 {
-                    if (!EndpointVerbs.TryGetValue(routeVerb, out verb))
-                        continue;
-
-                    var pathBuilder = routeBuilder.MapMethods(route.Path, verb, (HttpResponse response, HttpContext httpContext) =>
-                        HandleRequestAsync(requestType, httpContext));
-                    
-                    ConfigureOperationEndpoint(pathBuilder, operation);
-
-                    foreach (var handler in Options.RouteHandlerBuilders)
+                    foreach (var routeVerb in routeVerbs)
                     {
-                        handler(pathBuilder, operation, routeVerb, route.Path);
+                        if (!EndpointVerbs.TryGetValue(routeVerb, out verb))
+                            continue;
+
+                        routeRule = $"[{verb}] {route.Path}";
+                        var pathBuilder = routeBuilder.MapMethods(route.Path, verb, (HttpResponse response, HttpContext httpContext) =>
+                            HandleRequestAsync(requestType, httpContext));
+                        
+                        ConfigureOperationEndpoint(pathBuilder, operation);
+
+                        foreach (var handler in Options.RouteHandlerBuilders)
+                        {
+                            handler(pathBuilder, operation, routeVerb, route.Path);
+                        }
+                    }
+                    
+                    // Add /custom/path.{format} routes for GET requests
+                    if (routeVerbs.Contains(HttpMethods.Get) && !route.Path.Contains('.') && !route.Path.Contains('*'))
+                    {
+                        routeRule = $"[GET] {route.Path}.format";
+                        var pathBuilder = routeBuilder.MapMethods(route.Path + ".{format}", EndpointVerbs[HttpMethods.Get], 
+                            (string format, HttpResponse response, HttpContext httpContext) =>
+                                HandleRequestAsync(requestType, httpContext));
+                        
+                        ConfigureOperationEndpoint(pathBuilder, operation)
+                            .WithMetadata<string>(route.Path + ".format");
                     }
                 }
-                
-                // Add /custom/path.{format} routes for GET requests
-                if (routeVerbs.Contains(HttpMethods.Get) && !route.Path.Contains('.'))
+                catch (Exception e)
                 {
-                    var pathBuilder = routeBuilder.MapMethods(route.Path + ".{format}", EndpointVerbs[HttpMethods.Get], 
-                            (string format, HttpResponse response, HttpContext httpContext) =>
-                        HandleRequestAsync(requestType, httpContext));
-                    
-                    ConfigureOperationEndpoint(pathBuilder, operation)
-                        .WithMetadata<string>(route.Path + ".format");
+                    LogManager.GetLogger(GetType()).Error($"Error mapping route '{routeRule}' for {requestType.Name}: {e.Message}", e);
+                    throw;
                 }
             }
         }
@@ -575,6 +589,39 @@ public static class NetCoreAppHostExtensions
         
         ServiceStackHost.GlobalAfterConfigureServices.ForEach(fn => fn(services));
         ServiceStackHost.GlobalAfterConfigureServices.Clear();
+
+        if (options.ShouldAutoRegister<IAppSettings>() && !services.Exists<IAppSettings>())
+        {
+            services.AddSingleton<IAppSettings, NetCoreAppSettings>();
+        }
+        if (options.ShouldAutoRegister<IVirtualFiles>() && !services.Exists<IVirtualFiles>())
+        {
+            services.AddSingleton<IVirtualFiles>(c =>
+                new FileSystemVirtualFiles(c.GetRequiredService<IWebHostEnvironment>().ContentRootPath));
+        }
+        if (options.ShouldAutoRegister<IVirtualPathProvider>() && !services.Exists<IVirtualPathProvider>())
+        {
+            services.AddSingleton<IVirtualPathProvider>(c => ServiceStackHost.Instance.VirtualFileSources);
+        }
+        if (options.ShouldAutoRegister<ICacheClient>() && !services.Exists<ICacheClient>())
+        {
+            if (services.Exists<IRedisClientsManager>())
+                services.AddSingleton<ICacheClient>(c => c.GetRequiredService<IRedisClientsManager>().GetCacheClient());
+            else
+                services.AddSingleton<ICacheClient>(ServiceStackHost.DefaultCache);
+        }
+        if (options.ShouldAutoRegister<ICacheClientAsync>() && !services.Exists<ICacheClientAsync>())
+        {
+            services.AddSingleton<ICacheClientAsync>(c => c.GetRequiredService<ICacheClient>().AsAsync());
+        }
+        if (options.ShouldAutoRegister<MemoryCacheClient>() && !services.Exists<MemoryCacheClient>())
+        {
+            services.AddSingleton(ServiceStackHost.DefaultCache);
+        }
+        if (options.ShouldAutoRegister<IMessageFactory>() && !services.Exists<IMessageFactory>() && !services.Exists<IMessageService>())
+        {
+            services.AddSingleton<IMessageFactory>(c => c.GetRequiredService<IMessageService>().MessageFactory);
+        }
     }
 #endif
 
@@ -722,7 +769,7 @@ public static class NetCoreAppHostExtensions
 
     public static IHttpRequest ToRequest(this HttpContext httpContext, string? operationName = null)
     {
-        var req = new NetCoreRequest(httpContext, operationName, RequestAttributes.None);
+        var req = new NetCoreRequest(httpContext, operationName);
         req.RequestAttributes = req.GetAttributes() | RequestAttributes.Http;
         return req;
     }

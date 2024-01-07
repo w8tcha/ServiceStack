@@ -3,7 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
+using ServiceStack.Caching;
+using ServiceStack.Configuration;
 using ServiceStack.Host;
+using ServiceStack.IO;
+using ServiceStack.Messaging;
 using ServiceStack.Script;
 
 #nullable enable
@@ -58,6 +62,21 @@ public class ServiceStackServicesOptions
     /// Register ServiceStack Services and user-defined to load before AppHost Configure
     /// </summary>
     public Dictionary<Type, string[]> ServiceRoutes { get; } = new();
+
+    /// <summary>
+    /// Auto Register built-in dependencies when not registered
+    /// </summary>
+    public List<Type> AutoRegister { get; } = [
+        typeof(IAppSettings),
+        typeof(IVirtualFiles),
+        typeof(IVirtualPathProvider),
+        typeof(ICacheClient),
+        typeof(ICacheClientAsync),
+        typeof(MemoryCacheClient),
+        typeof(IMessageFactory),
+    ];
+
+    internal bool ShouldAutoRegister<T>() => AutoRegister.Contains(typeof(T));
     
     internal HashSet<Type> ServicesRegistered = [];
 
