@@ -25,10 +25,9 @@ public class JwtAuthProviderReader : AuthProvider, IAuthWithRequest, IAuthPlugin
     public const string Name = AuthenticateService.JwtProvider;
     public const string Realm = "/auth/" + AuthenticateService.JwtProvider;
 
-    public static readonly HashSet<string> IgnoreForOperationTypes = new()
-    {
-        nameof(StaticFileHandler),
-    };
+    public static readonly HashSet<string> IgnoreForOperationTypes = [
+        nameof(StaticFileHandler)
+    ];
 
     /// <summary>
     /// Different HMAC Algorithms supported
@@ -352,13 +351,15 @@ public class JwtAuthProviderReader : AuthProvider, IAuthWithRequest, IAuthPlugin
     public virtual void Init(IAppSettings appSettings = null)
     {
         Label = "JWT";
-        FormLayout = new() {
-            new InputInfo(nameof(IHasBearerToken.BearerToken), Html.Input.Types.Textarea) {
+        FormLayout =
+        [
+            new InputInfo(nameof(IHasBearerToken.BearerToken), Html.Input.Types.Textarea)
+            {
                 Label = "JWT",
                 Placeholder = "JWT Bearer Token",
                 Required = true,
-            },
-        };
+            }
+        ];
             
         RequireSecureConnection = true;
         EncryptPayload = false;
@@ -366,12 +367,12 @@ public class JwtAuthProviderReader : AuthProvider, IAuthWithRequest, IAuthPlugin
         RequireHashAlgorithm = true;
         RemoveInvalidTokenCookie = true;
         Issuer = "ssjwt";
-        Audiences = new List<string>();
+        Audiences = [];
         ExpireTokensIn = TimeSpan.FromDays(14);
         ExpireRefreshTokensIn = TimeSpan.FromDays(365);
-        FallbackAuthKeys = new List<byte[]>();
-        FallbackPublicKeys = new List<RSAParameters>();
-        FallbackPrivateKeys = new List<RSAParameters>();
+        FallbackAuthKeys = [];
+        FallbackPublicKeys = [];
+        FallbackPrivateKeys = [];
 
         if (appSettings != null)
         {
@@ -1100,7 +1101,6 @@ public class JwtAuthProviderReader : AuthProvider, IAuthWithRequest, IAuthPlugin
             Keywords.TokenCookie,
             DateTime.UtcNow.Add(ExpireTokensIn),
             Keywords.RefreshTokenCookie,
-            DateTime.UtcNow.Add(ExpireRefreshTokensIn),
             ctx.ReferrerUrl);
         return httpResult;
     }
@@ -1115,7 +1115,6 @@ public class JwtAuthProviderReader : AuthProvider, IAuthWithRequest, IAuthPlugin
             Keywords.TokenCookie,
             DateTime.UtcNow.Add(ExpireTokensIn),
             Keywords.RefreshTokenCookie,
-            DateTime.UtcNow.Add(ExpireRefreshTokensIn),
             ctx.ReferrerUrl);
         return httpResult;
     }
@@ -1127,7 +1126,6 @@ public static class JwtUtils
         string tokenCookie,
         DateTime expireTokenIn,
         string refreshTokenCookie,
-        DateTime expireRefreshTokenIn,
         string referrerUrl)
     {
         var httpResult = new HttpResult(responseDto);
@@ -1139,16 +1137,17 @@ public static class JwtUtils
             });
         responseDto.BearerToken = null;
 
-        var refreshToken = (responseDto as IHasRefreshToken)?.RefreshToken; 
-        if (refreshToken != null)
+        if (responseDto is IHasRefreshTokenExpiry { RefreshToken: not null, RefreshTokenExpiry: not null } hasRefreshToken 
+            && hasRefreshToken.RefreshTokenExpiry > DateTime.UtcNow)
         {
             httpResult.AddCookie(req,
-                new Cookie(refreshTokenCookie, refreshToken, Cookies.RootPath) {
+                new Cookie(refreshTokenCookie, hasRefreshToken.RefreshToken, Cookies.RootPath) {
                     HttpOnly = true,
                     Secure = req.IsSecureConnection,
-                    Expires = expireRefreshTokenIn,
+                    Expires = hasRefreshToken.RefreshTokenExpiry.Value,
                 });
-            ((IHasRefreshToken)responseDto).RefreshToken = null;
+            hasRefreshToken.RefreshToken = null;
+            hasRefreshToken.RefreshTokenExpiry = null;
         }
 
         NotifyJwtCookiesUsed(httpResult);
