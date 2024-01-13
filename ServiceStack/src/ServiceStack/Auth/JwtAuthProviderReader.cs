@@ -6,6 +6,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using ServiceStack.Configuration;
 using ServiceStack.Host;
 using ServiceStack.Host.Handlers;
@@ -17,7 +18,7 @@ namespace ServiceStack.Auth;
 /// <summary>
 /// Enable access to protected Services using JWT Tokens
 /// </summary>
-public class JwtAuthProviderReader : AuthProvider, IAuthWithRequest, IAuthPlugin
+public class JwtAuthProviderReader : AuthProvider, IAuthWithRequest
 {
     public override string Type => "Bearer";
     public static RsaKeyLengths UseRsaKeyLength = RsaKeyLengths.Bit2048;
@@ -264,7 +265,7 @@ public class JwtAuthProviderReader : AuthProvider, IAuthWithRequest, IAuthPlugin
     /// <summary>
     /// Modify the registration of ConvertSessionToToken Service
     /// </summary>
-    public Dictionary<Type, string[]> ServiceRoutes { get; set; }
+    public Dictionary<Type, string[]> ServiceRoutes { get; set; } = new();
 
     /// <summary>
     /// Allow JWT in ?ss-tok=jwt QueryString. (default false)
@@ -1064,6 +1065,12 @@ public class JwtAuthProviderReader : AuthProvider, IAuthWithRequest, IAuthPlugin
         return null;
     }
 
+    public override void Configure(IServiceCollection services, AuthFeature feature)
+    {
+        base.Configure(services, feature);
+        services.RegisterServices(ServiceRoutes);
+    }
+
     public override void Register(IAppHost appHost, AuthFeature feature)
     {
         base.Register(appHost, feature);
@@ -1079,8 +1086,6 @@ public class JwtAuthProviderReader : AuthProvider, IAuthWithRequest, IAuthPlugin
 
         KeyId ??= GetKeyId(null);
              
-        appHost.RegisterServices(ServiceRoutes);
-
         feature.AuthResponseDecorator = AuthenticateResponseDecorator;
         feature.RegisterResponseDecorator = RegisterResponseDecorator;
     }

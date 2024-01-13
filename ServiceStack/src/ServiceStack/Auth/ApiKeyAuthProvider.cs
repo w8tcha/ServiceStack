@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using ServiceStack.Auth;
 using ServiceStack.Configuration;
 using ServiceStack.Host;
@@ -69,20 +70,20 @@ namespace ServiceStack.Auth
     /// <summary>
     /// Enable access to protected Services using API Keys
     /// </summary>
-    public class ApiKeyAuthProvider : AuthProvider, IAuthWithRequest, IAuthPlugin
+    public class ApiKeyAuthProvider : AuthProvider, IAuthWithRequest
     {
         public override string Type => "Bearer";
         public const string Name = AuthenticateService.ApiKeyProvider;
         public const string Realm = "/auth/" + AuthenticateService.ApiKeyProvider;
 
-        public static string[] DefaultTypes = new[] { "secret" };
-        public static string[] DefaultEnvironments = new[] { "live", "test" };
+        public static string[] DefaultTypes = ["secret"];
+        public static string[] DefaultEnvironments = ["live", "test"];
         public static int DefaultKeySizeBytes = 24;
 
         /// <summary>
         /// Modify the registration of GetApiKeys and RegenerateApiKeys Services
         /// </summary>
-        public Dictionary<Type, string[]> ServiceRoutes { get; set; }
+        public Dictionary<Type, string[]> ServiceRoutes { get; set; } = new();
 
         /// <summary>
         /// How much entropy should the generated keys have. (default 24)
@@ -363,6 +364,12 @@ namespace ServiceStack.Auth
 
         public static string GetSessionKey(string apiKey) => "key:sess:" + apiKey;
 
+        public override void Configure(IServiceCollection services, AuthFeature feature)
+        {
+            base.Configure(services, feature);
+            services.RegisterServices(ServiceRoutes);
+        }
+
         public override void Register(IAppHost appHost, AuthFeature feature)
         {
             base.Register(appHost, feature);
@@ -372,8 +379,6 @@ namespace ServiceStack.Auth
                 if (InitSchema)
                     manageApiKeys.InitApiKeySchema();
             }
-
-            appHost.RegisterServices(ServiceRoutes);
 
             feature.AuthEvents.Add(new ApiKeyAuthEvents(this));
         }
