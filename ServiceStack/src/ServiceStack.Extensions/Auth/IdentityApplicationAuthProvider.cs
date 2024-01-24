@@ -1,5 +1,3 @@
-#nullable enable
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -68,6 +66,8 @@ public class IdentityApplicationAuthProvider<TUser,TKey> : IdentityAuthProvider<
         [ClaimTypes.HomePhone] = nameof(AuthUserSession.HomePhone),
         [ClaimTypes.MobilePhone] = nameof(AuthUserSession.MobilePhone),
         [ClaimTypes.Webpage] = nameof(AuthUserSession.Webpage),
+        [JwtClaimTypes.NickName] = nameof(AuthUserSession.DisplayName),
+        [JwtClaimTypes.Picture] = nameof(AuthUserSession.ProfileUrl),
     };
 
     /// <summary>
@@ -101,7 +101,7 @@ public class IdentityApplicationAuthProvider<TUser,TKey> : IdentityAuthProvider<
     public virtual async Task PreAuthenticateAsync(IRequest req, IResponse res)
     {
         var claimsPrincipal = req.GetClaimsPrincipal();
-        if (claimsPrincipal.Identity?.IsAuthenticated != true)
+        if (claimsPrincipal?.Identity?.IsAuthenticated != true)
             return;
 
         var session = await req.GetSessionAsync().ConfigAwait();

@@ -80,7 +80,25 @@ public class ServiceStackServicesOptions
         typeof(MemoryCacheClient),
         typeof(IMessageFactory),
     ];
+    
+#if NET6_0_OR_GREATER
+    public static System.Text.Json.JsonSerializerOptions DefaultSystemJsonOptions() => new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+        Converters = {
+            new System.Text.Json.Serialization.JsonStringEnumConverter(),
+            new SystemJson.XsdTimeSpanJsonConverter(),
+            new SystemJson.XsdTimeOnlyJsonConverter(),
+        },
+#if NET8_0_OR_GREATER
+        TypeInfoResolver = SystemJson.DataContractResolver.Instance,
+#endif
+    };
 
+    public System.Text.Json.JsonSerializerOptions SystemJsonOptions { get; set; } = DefaultSystemJsonOptions();
+#endif
+    
     internal bool ShouldAutoRegister<T>() => AutoRegister.Contains(typeof(T));
 
     public List<string> AllowedAuthenticationSchemes { get; } =
@@ -203,7 +221,8 @@ public class ServiceStackServicesOptions
         // If AppHost has initialized use Metadata Operations
         if (ServiceStackHost.Instance != null)
         {
-            foreach (var entry in ServiceStackHost.Instance.Metadata.OperationsMap)
+            var metadata = ServiceStackHost.GetOrCreateMetadata();
+            foreach (var entry in metadata.OperationsMap)
             {
                 to[entry.Key] = entry.Value.ServiceType;
             }
@@ -224,6 +243,8 @@ public class ServiceStackServicesOptions
         }
         return to;
     }
+    
+    public Type? HostType { get; set; }
 }
 
 #if NET8_0_OR_GREATER

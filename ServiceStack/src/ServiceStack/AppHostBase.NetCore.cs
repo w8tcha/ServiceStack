@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using Funq;
 using Microsoft.AspNetCore.Builder;
@@ -514,6 +515,17 @@ public abstract class AppHostBase : ServiceStackHost, IAppHostNetCore, IConfigur
 
     public static IRequest? GetOrCreateRequest(HttpContext httpContext) => httpContext.GetOrCreateRequest();
 
+    public static void DisposeApp()
+    {
+        var appHost = (AppHostBase)Instance;
+        if (appHost.app is Microsoft.Extensions.Hosting.IHost webApp)
+        {
+            webApp.Dispose();
+            appHost.app = null;
+        }
+        appHost.Dispose();
+    }
+
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
@@ -576,12 +588,17 @@ public static class NetCoreAppHostExtensions
     }
 
 #if NET8_0_OR_GREATER
-    public static void AddServiceStack(this IServiceCollection services, Assembly serviceAssembly, Action<ServiceStackServicesOptions>? configure = null) =>
+    public static void AddServiceStack(this IServiceCollection services, Assembly serviceAssembly, Action<ServiceStackServicesOptions>? configure = null)
+    {
+        ServiceStackHost.InitOptions.HostType ??= new System.Diagnostics.StackFrame(1).GetMethod()?.DeclaringType;
         services.AddServiceStack([serviceAssembly], configure);
-    
+    }
+
     public static void AddServiceStack(this IServiceCollection services, IEnumerable<Assembly>? serviceAssemblies, Action<ServiceStackServicesOptions>? configure = null)
     {
+        ServiceStackHost.InitOptions.HostType ??= new System.Diagnostics.StackFrame(1).GetMethod()?.DeclaringType;
         var options = ServiceStackHost.InitOptions;
+        
         options.UseServices(services);
         if (serviceAssemblies != null)
             options.ServiceAssemblies.AddRange(serviceAssemblies);
@@ -780,12 +797,12 @@ public static class NetCoreAppHostExtensions
         return builder;
     }
 
-    public static Task StartAsync(this WebApplication app, string url)
+    public static Task StartAsync(this WebApplication app, string url, CancellationToken token=default)
     {
         var addresses = ((IApplicationBuilder)app).ServerFeatures.Get<IServerAddressesFeature>()!.Addresses;
         addresses.Clear();
         addresses.Add(url);
-        return app.StartAsync();
+        return app.StartAsync(token);
     }
 #endif
 
@@ -843,7 +860,11 @@ public static class NetCoreAppHostExtensions
         }
         return null;
     }
-    
+
+    public static IServiceProvider GetServiceProvider(this IRequest? request) => 
+        request as IServiceProvider ?? ServiceStackHost.Instance.GetApplicationServices()
+        ?? throw new NotSupportedException("No IServiceProvider found");
+
 #if NET6_0_OR_GREATER
     public static T ConfigureAndResolve<T>(this IHostingStartup config, string? hostDir = null, bool setHostDir = true)
     {
