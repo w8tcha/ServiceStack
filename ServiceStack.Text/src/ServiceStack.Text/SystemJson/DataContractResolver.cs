@@ -25,7 +25,7 @@ public class DataContractResolver : DefaultJsonTypeInfoResolver
             var propInfos = type.GetProperties(BindingFlags.Instance | BindingFlags.Public);
             var hasDataContract = type.GetCustomAttribute<DataContractAttribute>() is not null;
             var propInfosToIgnore = propInfos.Where(x => x.GetCustomAttribute<IgnoreDataMemberAttribute>() is not null)
-                .Select(x => x.Name).ToSet(StringComparer.OrdinalIgnoreCase);
+                .Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             if (hasDataContract)
             {
@@ -61,7 +61,7 @@ public class DataContractResolver : DefaultJsonTypeInfoResolver
             else if (propInfosToIgnore.Count > 0)
             {
                 var propsToRemove = jsonTypeInfo.Properties
-                    .Where(jsonPropertyInfo => propInfosToIgnore.Contains(jsonPropertyInfo.Name));
+                    .Where(jsonPropertyInfo => propInfosToIgnore.Contains(jsonPropertyInfo.Name)).ToList();
                 foreach (var jsonPropertyInfo in propsToRemove)
                 {
                     jsonTypeInfo.Properties.Remove(jsonPropertyInfo);
