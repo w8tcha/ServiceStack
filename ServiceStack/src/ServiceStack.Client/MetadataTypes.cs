@@ -580,6 +580,16 @@ public class AppInfo : IMeta
     /// The configured JsConfig.TextCase
     /// </summary>
     public string JsTextCase { get; set; }
+
+    /// <summary>
+    /// Use System.Text.Json for APIs by default 
+    /// </summary>
+    public string UseSystemJson { get; set; }
+    
+    /// <summary>
+    /// Info on Endpoint Routing
+    /// </summary>
+    public List<string>? EndpointRouting { get; set; }
     
     /// <summary>
     /// Custom User-Defined Attributes
@@ -1508,7 +1518,7 @@ public static class AppMetadataUtils
 
     public static PropertyInfo[] GetInstancePublicProperties(this Type type)
     {
-        return type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+        return type.GetProperties(BindingFlags.Public | BindingFlags.Instance )
             .OnlySerializableProperties(type)
             .Where(t =>
                 t.GetIndexParameters().Length == 0 && // ignore indexed properties
