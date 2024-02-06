@@ -10,6 +10,7 @@ using MyApp.Data;
 using MyApp.Components;
 using MyApp.Components.Account;
 using MyApp.ServiceInterface;
+using ServiceStack.Text;
 
 Console.WriteLine("Program.cs");
 var builder = WebApplication.CreateBuilder(args);
@@ -28,11 +29,7 @@ services.AddScoped<IdentityRedirectManager>();
 services.AddScoped<AuthenticationStateProvider, IdentityRevalidatingAuthenticationStateProvider>();
 
 Console.WriteLine("services.AddAuthentication()");
-services.AddAuthentication(options =>
-    {
-        options.DefaultScheme = IdentityConstants.ApplicationScheme;
-        options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
-    })
+services.AddAuthentication()
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new()
@@ -78,6 +75,12 @@ services.AddLocalStorage();
 services.AddEndpointsApiExplorer();
 services.AddSwaggerGen();
 
+builder.Services.ConfigureJsonOptions(options => {
+    // options.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.KebabCaseUpper;
+})
+.ApplyToApiJsonOptions()
+.ApplyToMvcJsonOptions();
+
 // Register all services
 Console.WriteLine("services.AddServiceStack()");
 services.AddServiceStack(typeof(MyServices).Assembly, c => {
@@ -114,6 +117,7 @@ app.MapRazorComponents<App>()
 
 // Add additional endpoints required by the Identity /Account Razor components.
 app.MapAdditionalIdentityEndpoints();
+app.MapGet("/time", () => new { Time = DateTime.UtcNow.TimeOfDay, Code = HttpStatusCode.Accepted });
 
 Console.WriteLine("app.UseServiceStack()");
 app.UseServiceStack(new AppHost(), options =>
