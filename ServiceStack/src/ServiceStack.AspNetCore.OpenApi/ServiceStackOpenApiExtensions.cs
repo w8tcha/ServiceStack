@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Any;
@@ -9,8 +11,6 @@ namespace ServiceStack;
 
 public static class ServiceStackOpenApiExtensions
 {
-    public static OpenApiMetadata OpenApiMetadata { get; set; } = new();
-
     public static void WithOpenApi(this ServiceStackOptions options)
     {
         if (!options.MapEndpointRouting)
@@ -20,7 +20,7 @@ public static class ServiceStackOpenApiExtensions
         {
             builder.WithOpenApi(op =>
             {
-                OpenApiMetadata.AddOperation(op, operation, method, route);
+                OpenApiMetadata.Instance.AddOperation(op, operation, method, route);
                 return op;
             });
         });
@@ -28,11 +28,38 @@ public static class ServiceStackOpenApiExtensions
 
     public static void AddSwagger(this ServiceStackServicesOptions options, Action<OpenApiMetadata>? configure = null)
     {
-        configure?.Invoke(OpenApiMetadata);
+        configure?.Invoke(OpenApiMetadata.Instance);
 
-        options.Services!.AddSingleton(OpenApiMetadata);
+        options.Services!.AddSingleton(OpenApiMetadata.Instance);
         options.Services!.AddSingleton<IConfigureOptions<SwaggerGenOptions>, ConfigureServiceStackSwagger>();
         options.Services!.AddSingleton<IConfigureOptions<ServiceStackOptions>, ConfigureServiceStackSwagger>();
+        
+        options.Services!.ConfigurePlugin<MetadataFeature>(feature => {
+            feature.AddPluginLink("/swagger/index.html", "Swagger UI");
+        });
+    }
+
+    public static void AddServiceStackSwagger(this IServiceCollection services, Action<OpenApiMetadata>? configure = null)
+    {
+        configure?.Invoke(OpenApiMetadata.Instance);
+
+        services.AddSingleton(OpenApiMetadata.Instance);
+        services.AddSingleton<IConfigureOptions<SwaggerGenOptions>, ConfigureServiceStackSwagger>();
+        services.AddSingleton<IConfigureOptions<ServiceStackOptions>, ConfigureServiceStackSwagger>();
+        
+        services.ConfigurePlugin<MetadataFeature>(feature => {
+            feature.AddPluginLink("/swagger/index.html", "Swagger UI");
+        });
+    }
+        
+    public static AuthenticationBuilder AddBasicAuth<TUser>(this IServiceCollection services)
+        where TUser : IdentityUser, new() {
+        OpenApiMetadata.Instance.AddBasicAuth();
+        return new AuthenticationBuilder(services).AddBasicAuth<TUser,string>();
+    }
+
+    public static void AddJwtAuth(this IServiceCollection services) {
+        OpenApiMetadata.Instance.AddJwtBearer();
     }
 
     public static void AddBasicAuth(this SwaggerGenOptions options) =>
@@ -43,4 +70,5 @@ public static class ServiceStackOpenApiExtensions
 
     internal static List<IOpenApiAny> ToOpenApiEnums(this IEnumerable<string>? enums) =>
         enums.Safe().Map(x => (IOpenApiAny)new OpenApiString(x));
+
 }

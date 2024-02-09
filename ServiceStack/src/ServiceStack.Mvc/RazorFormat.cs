@@ -59,7 +59,7 @@ public class RazorFormat : IPlugin, Html.IViewEngine, Model.IHasStringId
     {
         var views = virtualFiles.GetDirectory("Views");
         if (views == null)
-            return new List<string> { "~/Views" };
+            return ["~/Views"];
 
         var files = views.GetAllMatchingFiles("*.cshtml");
         var folders = files.Map(x => x.VirtualPath.LastLeftPart("/"));
@@ -715,10 +715,11 @@ public static class RazorViewExtensions
             (html.ViewContext.ViewData.Model as ServiceStack.Mvc.RazorPage)?.TryGetHttpRequest() ??
 #endif 
             html.ViewContext.ViewData[Keywords.IRequest] as IRequest
-            ?? html.ViewContext.HttpContext.Items[Keywords.IRequest] as IRequest
+            ?? html.ViewContext.HttpContext?.Items[Keywords.IRequest] as IRequest
 #if NET6_0_OR_GREATER
             ?? (html.ViewContext.ViewData.Model as ServiceStack.Mvc.RazorPage)?.HttpRequest
 #endif 
+            ?? html.ViewContext.HttpContext?.ToRequest()
             ?? HostContext.AppHost.TryGetCurrentRequest();
         return req;
     }
