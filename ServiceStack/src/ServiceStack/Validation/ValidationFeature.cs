@@ -439,6 +439,8 @@ public static class ValidationExtensions
                     var genericValidator = type.GetTypeWithGenericInterfaceOf(typeof(IValidator<>));
                     if (genericValidator != null && !type.IsAbstract && !type.IsGenericTypeDefinition)
                     {
+                        if (type.GetCustomAttributes<IgnoreServicesAttribute>().Any())
+                            continue;
                         ValidatorTypes.Add(type);
                     }
                 }
@@ -481,6 +483,21 @@ public static class ValidationExtensions
         }
     }
 
+    public static void RegisterValidator<T>(this IServiceCollection services, Func<IServiceProvider,IValidator<T>> factoryFn, ServiceLifetime lifetime = ServiceLifetime.Transient)
+    {
+        var validatorType = typeof(IValidator<T>);
+        if (RegisteredValidators.Contains(validatorType))
+            return;
+        
+        var dtoType = typeof(T);
+        ValidatorTypes.AddIfNotExists(validatorType);
+        TypesValidatorsMap[dtoType] = validatorType;
+
+        services.Add(typeof(IValidator<T>), factoryFn, lifetime);
+
+        RegisteredDtoValidators.Add(dtoType);
+    }
+    
     public static void RegisterValidator(this IServiceCollection services, Type validator, ServiceLifetime lifetime = ServiceLifetime.Transient)
     {
         if (RegisteredValidators.Contains(validator))
@@ -506,7 +523,10 @@ public static class ValidationExtensions
         ValidatorTypes.AddIfNotExists(validator);
         TypesValidatorsMap[dtoType] = validator;
 
-        services.Add(validatorType, validator, lifetime);
+        if (!services.Exists(validatorType))
+        {
+            services.Add(validatorType, validator, lifetime);
+        }
         
         RegisteredDtoValidators.Add(dtoType);
     }
