@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Identity;
 using ServiceStack.FluentValidation;
 using ServiceStack.Text;
 using ServiceStack.Validation;
+using ServiceStack.Web;
 
 namespace ServiceStack.Auth;
 
@@ -55,12 +56,17 @@ public class IdentityRegistrationValidator<TUser,TKey> : AbstractValidator<Regis
 /// </summary>
 public abstract class IdentityRegisterServiceBase<TUser, TKey>(UserManager<TUser> userManager) : RegisterServiceBase
     where TKey : IEquatable<TKey>
-    where TUser : IdentityUser<TKey>
+    where TUser : IdentityUser<TKey>, new()
 {
 #if NET8_0_OR_GREATER
     [Microsoft.AspNetCore.Mvc.FromServices]
 #endif
     public IValidator<Register>? RegistrationValidator { get; set; }
+
+    public IdentityAuthContext<TUser, TKey> AuthContext => IdentityAuth.Instance<TUser, TKey>()
+        ?? throw new Exception(nameof(IdentityAuth) + " not configured");
+
+    protected UserManager<TUser> UserManager => userManager;
 
     protected TUser ToUser(Register request)
     {
@@ -78,6 +84,8 @@ public abstract class IdentityRegisterServiceBase<TUser, TKey>(UserManager<TUser
         var validator = RegistrationValidator 
             ?? ValidatorCache.GetValidator(Request, typeof(Register)) as IValidator<Register>
             ?? new IdentityRegistrationValidator<TUser, TKey>();
+        if (validator is IRequiresRequest requiresRequest)
+            requiresRequest.Request ??= Request;
         await validator.ValidateAndThrowAsync(request, ApplyTo.Post).ConfigAwait();
     }
 
@@ -113,7 +121,7 @@ public class IdentityRegisterService<TUser, TKey>(UserManager<TUser> userManager
         var result = await userManager.CreateAsync(newUser, request.Password);
         if (result.Succeeded)
         {
-            session = IdentityAuth.Instance<TUser,TKey>()!.UserToSessionConverter(newUser);
+            session = AuthContext.UserToSessionConverter(newUser);
             await RegisterNewUserAsync(session, newUser);
 
             var response = await CreateRegisterResponse(session,
