@@ -26,9 +26,11 @@ public class MetadataFeature : IPlugin, IConfigureServices, Model.IHasStringId, 
 {
     public string Id { get; set; } = Plugins.Metadata;
     public string PluginLinksTitle { get; set; } = "Plugin Links:";
+    public string PluginLinksStyle { get; set; } = "font-size:16px;";
     public Dictionary<string, string> PluginLinks { get; set; } = new();
 
     public string DebugLinksTitle { get; set; } = "Debug Info:";
+    public string DebugLinksStyle { get; set; } = "";
     public Dictionary<string, string> DebugLinks { get; set; } = new()
     {
         ["operations/metadata"] = "Operations Metadata",
@@ -114,8 +116,7 @@ public class MetadataFeature : IPlugin, IConfigureServices, Model.IHasStringId, 
         appHost.CatchAllHandlers.Add(GetHandler);
         
 #if NET8_0_OR_GREATER
-        var host = (IAppHostNetCore)appHost;
-        host.MapEndpoints(routeBuilder =>
+        (appHost as IAppHostNetCore).MapEndpoints(routeBuilder =>
         {
             var tag = GetType().Name;
             routeBuilder.MapGet("/metadata", httpContext => httpContext.ProcessRequestAsync(new IndexMetadataHandler()))
@@ -268,10 +269,10 @@ public static class MetadataUtils
         var pluginsOnly = view?.StartsWith("plugins") == true; 
         var metadataTypes = new MetadataTypes
         {
-            Namespaces = new(),
-            Operations = new(),
             Config = new(),
-            Types = new(),
+            Namespaces = [],
+            Operations = [],
+            Types = [],
         };
             
         if (!pluginsOnly)
