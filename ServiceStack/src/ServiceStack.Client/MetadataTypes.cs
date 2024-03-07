@@ -1496,20 +1496,16 @@ public static class AppMetadataUtils
 
     public static List<MetadataPropertyType> GetAllProperties(this AppMetadata api, MetadataType metaType)
     {
-        //var metaType = api.GetType(forType);
         var to = new List<MetadataPropertyType>();
 
         while (metaType != null)
         {
             foreach (var prop in metaType.Properties.OrEmpty())
             {
-                if (to.Any(x => x.Name == prop.Name))
+                if (to.All(x => x.Name != prop.Name))
                     to.Add(prop);
             }
-            if (metaType.Inherits != null)
-            {
-                metaType = api.GetType(metaType.Inherits);
-            }
+            metaType = metaType.Inherits != null ? api.GetType(metaType.Inherits) : null;
         }
 
         return to;
