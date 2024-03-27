@@ -221,16 +221,30 @@ public static class LicenseUtils
         Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
         try
         {
+            licenseKeyText = licenseKeyText?.Trim();
+            if (string.IsNullOrEmpty(licenseKeyText))
+                throw new ArgumentNullException(nameof(licenseKeyText));
+            
             if (IsFreeLicenseKey(licenseKeyText))
             {
                 ValidateFreeLicenseKey(licenseKeyText);
                 return;
             }
                 
-            var parts = licenseKeyText.SplitOnFirst('-');
-            subId = parts[0];
+            subId = licenseKeyText.LeftPart('-');
+            if (!int.TryParse(subId, out var subIdInt))
+            {
+                if (!licenseKeyText.StartsWith("TRIAL"))
+                    throw new LicenseException("This license is invalid." + ContactDetails);
+            }
+                
+            if (Env.IsAot())
+            {
+                __setActivatedLicense(new __ActivatedLicense(new LicenseKey { Type = LicenseType.Indie }));
+                return;
+            }
 
-            if (int.TryParse(subId, out var subIdInt) && revokedSubs.Contains(subIdInt))
+            if (revokedSubs.Contains(subIdInt))
                 throw new LicenseException("This subscription has been revoked. " + ContactDetails);
 
             var key = VerifyLicenseKeyText(licenseKeyText);
