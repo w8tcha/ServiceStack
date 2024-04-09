@@ -67,8 +67,37 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
             throw;
         }
     }
+    
+    public virtual async Task<IVirtualFile> GetFileAsync(string virtualPath)
+    {
+        if (string.IsNullOrEmpty(virtualPath))
+            return null;
 
-    protected S3VirtualDirectory GetParentDirectory(string dirPath)
+        var filePath = SanitizePath(virtualPath);
+        try
+        {
+            var response = await AmazonS3.GetObjectAsync(new GetObjectRequest
+            {
+                Key = filePath,
+                BucketName = BucketName,
+            }).ConfigAwait();
+
+            var dirPath = GetDirPath(filePath);
+            var dir = dirPath == null
+                ? RootDirectory
+                : GetParentDirectory(dirPath);
+            return new S3VirtualFile(this, dir).Init(response);
+        }
+        catch (AmazonS3Exception ex)
+        {
+            if (ex.StatusCode == HttpStatusCode.NotFound)
+                return null;
+
+            throw;
+        }
+    }
+
+    public virtual S3VirtualDirectory GetParentDirectory(string dirPath)
     {
         if (string.IsNullOrEmpty(dirPath))
             return null;
@@ -188,6 +217,14 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
         });
     }
 
+    public virtual async Task DeleteFileAsync(string filePath)
+    {
+        await AmazonS3.DeleteObjectAsync(new DeleteObjectRequest {
+            BucketName = BucketName,
+            Key = SanitizePath(filePath),
+        }).ConfigAwait();
+    }
+
     public virtual void DeleteFiles(IEnumerable<string> filePaths)
     {
         var batches = filePaths
@@ -205,6 +242,26 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
             }
 
             AmazonS3.DeleteObjects(request);
+        }
+    }
+
+    public virtual async Task DeleteFilesAsync(IEnumerable<string> filePaths)
+    {
+        var batches = filePaths
+            .BatchesOf(MultiObjectLimit);
+
+        foreach (var batch in batches)
+        {
+            var request = new DeleteObjectsRequest {
+                BucketName = BucketName,
+            };
+
+            foreach (var filePath in batch)
+            {
+                request.AddKey(SanitizePath(filePath));
+            }
+
+            await AmazonS3.DeleteObjectsAsync(request).ConfigAwait();
         }
     }
 
