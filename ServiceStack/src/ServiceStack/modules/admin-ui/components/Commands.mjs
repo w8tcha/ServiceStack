@@ -5,7 +5,6 @@ import { prettyJson } from "core"
 import { ViewCommands } from "dtos"
 import { Chart, registerables } from 'chart.js'
 Chart.register(...registerables)
-
 export const Column = {
     template:/*html*/`
         <div class="cursor-pointer flex items-center" @click="toggle()">
@@ -20,7 +19,6 @@ export const Column = {
     setup(props) {
         const routes = inject('routes')
         const nameDesc = `-${props.name}`
-
         function toggle() {
             const sort = routes.sort === props.name 
                 ? nameDesc 
@@ -32,8 +30,6 @@ export const Column = {
         return { routes, toggle, humanify }
     }
 }
-
-
 export const Commands = {
     components: { Column },
     template:/*html*/`
@@ -58,7 +54,6 @@ export const Commands = {
           </div>
         </div>
       </div>
-
       <ErrorSummary :status="api.error" />
         
       <div v-if="api.response">
@@ -125,12 +120,10 @@ export const Commands = {
             </DataGrid>
           </div>
         </div>
-
         <div class="mt-12 flex justify-center">
           <loading v-if="loadingMore" class="text-gray-400">loading...</loading>
         </div>
         <span ref="bottom"></span>
-
         <div v-if="selectedError" class="relative z-20" aria-labelledby="slide-over-title" role="dialog" aria-modal="true">
           <div class="fixed overflow-hidden">
             <div class="absolute overflow-hidden">
@@ -138,7 +131,6 @@ export const Commands = {
                 <div class="pointer-events-auto w-screen max-w-2xl">
                   <form class="flex h-full flex-col overflow-y-auto bg-white shadow-xl">
                     <div class="flex-1">
-
                       <!-- Header -->
                       <div class="bg-gray-50 px-4 py-6 sm:px-6">
                         <div class="flex items-start justify-between space-x-3">
@@ -154,9 +146,7 @@ export const Commands = {
                           </div>
                         </div>
                       </div>
-
                       <div class="space-y-6 py-6 sm:space-y-0 sm:divide-y sm:divide-gray-200 sm:py-0">
-
                         <div class="flex overflow-auto">
                           <div class="relative w-full">
                             <div class="bg-indigo-700 text-white px-3 py-3">
@@ -212,7 +202,6 @@ export const Commands = {
             relativeTimeFromDate,
             relativeTimeFromMs,
         } = useFormatters()
-
         let take = 50
         const bottom = ref()
         const loadingMore = ref(false)
@@ -246,9 +235,7 @@ export const Commands = {
             //console.log('routes.sort', routes.sort)
             commandTotals.value = filterCommandTotals(api.value?.response?.commandTotals ?? [])
         })
-
         const tabs = { 'Summary':'', 'Errors':'errors', 'Latest':'latest', }
-
         const elChart = ref()
         
         const selectedRow = computed(() => 
@@ -258,7 +245,6 @@ export const Commands = {
         function createChart(row) {
             if (!row) return
             const timings = row.timings
-
             if (chart) {
                 chart.destroy()
                 chart = null
@@ -328,7 +314,6 @@ export const Commands = {
             commandTotals.value = filterCommandTotals(api.value?.response?.commandTotals ?? [])
             createChart(selectedRow.value)
         }
-
         /** @param {KeyboardEvent} e */
         function handleNav(e) {
             if (e.key === 'ArrowUp') {
@@ -359,10 +344,8 @@ export const Commands = {
                 }
             }
         }
-
         onMounted(async () => {
             await refresh()
-
             setTimeout(initObserver, 1000)
             document.addEventListener('keydown', handleNav)
         })
@@ -382,7 +365,6 @@ export const Commands = {
         watch(() => routes.op, op => {
             createChart(selectedRow.value)
         })
-
         function headerSelected(column) {
             //console.log('headerSelected',column)
         }
@@ -392,7 +374,6 @@ export const Commands = {
             //console.log('rowSelected', row)
             createChart(selectedRow.value)
         }
-
         async function loadMore() {
             const shouldLoad = routes.tab === 'latest' || routes.tab === 'errors'
             console.log('load more...', hasMore, shouldLoad)
@@ -407,7 +388,6 @@ export const Commands = {
                 }
             }
         }
-
         let observer = null
         function initObserver() {
             if (!bottom.value) return
@@ -417,7 +397,6 @@ export const Commands = {
                 }, { threshold: 1.0 })
             observer.observe(bottom.value)
         }
-
         const selectedError = computed(() => 
             routes.tab === 'errors' && routes.show && api.value.response?.latestFailed?.find(x => x.id === routes.show))
         const selectedClean = computed(() => {
@@ -443,7 +422,6 @@ export const Commands = {
                 error.errors?.length > 0 ? '\n' + error.errors?.map(x => `  - ${x.errorCode}: ${x.message}`).join('\n') : null,
             ].filter(x => !!x).join('\n')
         }
-
         return { 
             routes, api, commandTotals, tabs, elChart, bottom, loadingMore, q, type, 
             refresh, headerSelected, rowSelected,

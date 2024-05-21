@@ -16,14 +16,19 @@ using ServiceStack.Web;
 
 namespace ServiceStack;
 
-public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema
+public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Model.IHasStringId
 {
+    public string Id { get; set; } = Plugins.ApiKeys;
+    public string AdminRole { get; set; } = RoleNames.Admin;
+
     public string? ApiKeyPrefix = "ak-";
-    public string? HttpHeaderName = "x-api-key";
+    public string? HttpHeader = "x-api-key";
     public TimeSpan? CacheDuration = TimeSpan.FromMinutes(10);
     public Func<string>? ApiKeyGenerator { get; set; }
     public TimeSpan? DefaultExpiry { get; set; }
 
+    public string Label { get; set; }
+    
     public class ApiKey : IApiKey
     {
         [AutoIncrement]
@@ -80,6 +85,11 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema
 
     private static ConcurrentDictionary<string, (IApiKey apiKey, DateTime dateTime)> Cache = new();
 
+    public ApiKeysFeature()
+    {
+        Label = "API Key";
+    }
+
     public string GenerateApiKey() => ApiKeyGenerator != null 
         ? ApiKeyGenerator()
         : (ApiKeyPrefix ?? "") + Guid.NewGuid().ToString("N");
@@ -87,13 +97,22 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema
     public void Register(IAppHost appHost)
     {
         appHost.GlobalRequestFiltersAsync.Insert(0, RequestFilterAsync);
+        
+        appHost.AddToAppMetadata(meta =>
+        {
+            meta.Plugins.ApiKey = new()
+            {
+                Label = Label.Localize(),
+                HttpHeader = HttpHeader,
+            };
+        });
     }
 
     public async Task RequestFilterAsync(IRequest req, IResponse res, object requestDto)
     {
-        var apiKeyToken = (HttpHeaderName != null ? req.GetHeader(HttpHeaderName) : null) ?? req.GetBearerToken();
-        if (string.IsNullOrEmpty(apiKeyToken)) 
-            return;
+        var apiKeyToken = GetApiKeyToken(req); 
+        if (apiKeyToken == null) return;
+        
         var authSecret = HostContext.Config.AdminAuthSecret;
         if (authSecret != null && authSecret == apiKeyToken)
         {
@@ -131,6 +150,14 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema
                 Cache[apiKeyToken] = (apiKey, DateTime.UtcNow);
             }
         }
+    }
+
+    public string? GetApiKeyToken(IRequest req)
+    {
+        var to = (HttpHeader != null ? req.GetHeader(HttpHeader) : null) ?? req.GetBearerToken();
+        if (string.IsNullOrEmpty(to)) 
+            return null;
+        return to;
     }
 
     public void InitSchema()
@@ -177,21 +204,42 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema
     public void Configure(IServiceCollection services)
     {
         services.AddSingleton<IApiKeySource, ApiKeysFeatureSource>();
+        services.AddSingleton<IApiKeyResolver>(_ => new ApiKeyResolver(this));
+    }
+
+
+    public void BeforePluginsLoaded(IAppHost appHost)
+    {
+        appHost.ConfigurePlugin<UiFeature>(feature => {
+            feature.AddAdminLink(AdminUiFeature.Commands, new LinkInfo {
+                Id = "apikeys",
+                Label = "API Keys",
+                Icon = Svg.ImageSvg(Svg.Create(Svg.Body.Keys)),
+                Show = $"role:{AdminRole}",
+            });
+        });
     }
 }
 
 public static class ApiKeysExtensions
 {
-    public static string? GetApiKeyId(this IRequest? req) =>
-        req.GetApiKey()?.Key;
-    
+    public static string? GetApiKeyToken(this IRequest? req) => req.GetApiKey()?.Key;
+
     public static string? GetApiKeyUser(this IRequest? req) =>
         req.GetApiKey() is ApiKeysFeature.ApiKey x 
             ? x.UserName ?? x.UserId
             : req.GetApiKey() is Auth.ApiKey y ? y.UserAuthId : null;
 }
 
-public class ApiKeysFeatureSource(IDbConnectionFactory dbFactory) : IApiKeySource
+
+class ApiKeyResolver(ApiKeysFeature feature) : IApiKeyResolver
+{
+    public string? GetApiKeyToken(IRequest req)
+    {
+        return feature.GetApiKeyToken(req);
+    }
+}
+class ApiKeysFeatureSource(IDbConnectionFactory dbFactory) : IApiKeySource
 {
     public async Task<IApiKey?> GetApiKeyAsync(string key)
     {
