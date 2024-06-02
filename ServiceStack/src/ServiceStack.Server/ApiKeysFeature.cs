@@ -6,7 +6,9 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Identity;
 using ServiceStack.Configuration;
 using ServiceStack.Data;
 using ServiceStack.DataAnnotations;
@@ -28,15 +30,35 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
     public TimeSpan? DefaultExpiry { get; set; }
     public Dictionary<int, DateTime> LastUsedApiKeys { get; set; } = new();
 
+    public List<Type> RegisterServices { get; set; } = [
+        typeof(AdminApiKeysService),
+        typeof(UserApiKeysService),
+    ];
+
+    /// <summary>
+    /// Available Scopes Admin Users can assign to API Keys
+    /// </summary>
     public List<string> Scopes { get; set; } =
     [
         RoleNames.Admin
     ];
-
-    public List<string> Features { get; set; } = [];
     
-    public List<KeyValuePair<string, string>> ExpiresIn { get; set; } = new()
-    {
+    /// <summary>
+    /// Available Features Admin Users can assign to API Keys
+    /// </summary>
+    public List<string> Features { get; set; } = [];
+
+    /// <summary>
+    /// Available Scopes Users can assign to their own API Keys
+    /// </summary>
+    public List<string> UserScopes { get; set; } = [];
+
+    /// <summary>
+    /// Available Features Users can assign to their own API Keys
+    /// </summary>
+    public List<string> UserFeatures { get; set; } = [];
+    
+    public List<KeyValuePair<string, string>> ExpiresIn { get; set; } = [
         new("", "Never"),
         new("1", "1 day"),
         new("7", "7 days"),
@@ -46,8 +68,8 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
         new("365", "365 days"),
         new("730", "2 years"),
         new("1825", "5 years"),
-        new("3650", "10 years"),
-    };
+        new("3650", "10 years")
+    ];
 
     public string Label { get; set; }
     
@@ -136,6 +158,25 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
         });
     }
 
+    public ApiKeyInfo GetApiKeyInfo()
+    {
+        return new()
+        {
+            Label = Label.Localize(),
+            HttpHeader = HttpHeader,
+            Scopes = UserScopes,
+            Features = UserFeatures,
+            ExpiresIn = ExpiresIn,
+        };
+    }
+
+    public PartialApiKey ToPartialApiKey(ApiKey apiKey)
+    {
+        var to = apiKey.ConvertTo<PartialApiKey>();
+        to.Active = apiKey.CancelledDate == null && (apiKey.ExpiryDate == null || apiKey.ExpiryDate > DateTime.UtcNow);
+        return to;
+    }
+
     public async Task RequestFilterAsync(IRequest req, IResponse res, object requestDto)
     {
         var apiKeyToken = GetApiKeyToken(req); 
@@ -213,7 +254,10 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
     {
         db.DropTable<ApiKey>();
     }
-    
+
+    public long ApiKeyCount(IDbConnection db) => db.Count<ApiKey>();
+    public async Task<long> ApiKeyCountAsync(IDbConnection db) => await db.CountAsync<ApiKey>();
+
     public void InitKey(ApiKey to)
     {
         if (string.IsNullOrEmpty(to.Key))
@@ -225,6 +269,20 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
         to.CreatedDate = DateTime.UtcNow;
         if (DefaultExpiry != null)
             to.ExpiryDate = DateTime.UtcNow.Add(DefaultExpiry.Value);
+    }
+
+    public ApiKey Insert(IDbConnection db, ApiKey apiKey)
+    {
+        InitKey(apiKey);
+        apiKey.Id = (int)db.Insert(apiKey, selectIdentity:true);
+        return apiKey;
+    }
+
+    public async Task<ApiKey> InsertAsync(IDbConnection db, ApiKey apiKey)
+    {
+        InitKey(apiKey);
+        apiKey.Id = (int)await db.InsertAsync(apiKey, selectIdentity:true);
+        return apiKey;
     }
 
     public void InsertAll(IDbConnection db, List<ApiKey> apiKeys)
@@ -243,7 +301,10 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
     {
         services.AddSingleton<IApiKeySource>(c => new ApiKeysFeatureSource(this, c.GetRequiredService<IDbConnectionFactory>()));
         services.AddSingleton<IApiKeyResolver>(_ => new ApiKeyResolver(this));
-        services.RegisterService<AdminApiKeysService>();
+        foreach (var serviceType in RegisterServices)
+        {
+            services.RegisterService(serviceType);
+        }
     }
 
     public void BeforePluginsLoaded(IAppHost appHost)
@@ -320,8 +381,8 @@ public class AdminApiKeysService(IDbConnectionFactory dbFactory) : Service
             q.Take(request.Take.Value);
         
         var results = await db.SelectAsync(q);
-        var partialResults = results.ConvertAll(x => x.ConvertTo<PartialApiKey>());
         var feature = HostContext.AssertPlugin<ApiKeysFeature>();
+        var partialResults = results.ConvertAll(feature.ToPartialApiKey);
         foreach (var result in partialResults)
         {
             if (feature.LastUsedApiKeys.TryGetValue(result.Id, out var lastUsed))
@@ -375,4 +436,114 @@ public class AdminApiKeysService(IDbConnectionFactory dbFactory) : Service
     }
 }
 
+
+public class UserApiKeysService(IDbConnectionFactory dbFactory) : Service
+{
+    private (string userId, string? userName) GetUserIdAndUserName()
+    {
+        var claimsPrincipal = Request.GetClaimsPrincipal();
+        var userId = claimsPrincipal.GetUserId()
+                     ?? throw new ArgumentNullException(nameof(IdentityUser.Id));
+        var userName = claimsPrincipal.GetUserName();
+        return (userId, userName);
+    }
+
+    public async Task<object> Get(QueryUserApiKeys request)
+    {
+        var (userId, _) = GetUserIdAndUserName();
+        using var db = dbFactory.OpenDbConnection();
+        var q = db.From<ApiKeysFeature.ApiKey>()
+            .Where(x => x.UserId == userId);
+        if (request.Id != null)
+            q.Where(x => x.Id == request.Id);
+        if (!string.IsNullOrEmpty(request.Search))
+        {
+            var search = request.Search.ToLower();
+            q.Where(x => x.Name.ToLower().Contains(search) || x.Notes.ToLower().Contains(search));
+        }
+        if (request.OrderBy != null)
+            q.OrderBy(request.OrderBy);
+        if (request.Skip != null)
+            q.Skip(request.Skip.Value);
+        if (request.Take != null)
+            q.Take(request.Take.Value);
+        
+        var results = await db.SelectAsync(q);
+        var feature = HostContext.AssertPlugin<ApiKeysFeature>();
+        var partialResults = results.ConvertAll(feature.ToPartialApiKey);
+        foreach (var result in partialResults)
+        {
+            if (feature.LastUsedApiKeys.TryGetValue(result.Id, out var lastUsed))
+                result.LastUsedDate = lastUsed;
+        }
+        return new UserApiKeysResponse
+        {
+            Results = partialResults
+        };
+    }
+
+    public async Task<object> Any(CreateUserApiKey request)
+    {
+        var feature = HostContext.AssertPlugin<ApiKeysFeature>();
+
+        var (userId, userName) = GetUserIdAndUserName();
+        var apiKey = request.ConvertTo<ApiKeysFeature.ApiKey>();
+        apiKey.UserId = userId;
+        apiKey.UserName = userName;
+        if (request.Scopes is { Count: > 0 })
+        {
+            apiKey.Scopes = request.Scopes.Where(x => feature.UserScopes.Contains(x)).ToList();
+        }
+        if (request.Features is { Count: > 0 })
+        {
+            apiKey.Features = request.Features.Where(x => feature.UserFeatures.Contains(x)).ToList();
+        }
+        
+        await feature.InsertAllAsync(Db, [apiKey]);
+        return new UserApiKeyResponse
+        {
+            Result = apiKey.Key
+        };
+    }
+
+    public async Task<object> Any(UpdateUserApiKey request)
+    {
+        var (userId, _) = GetUserIdAndUserName();
+        var feature = HostContext.AssertPlugin<ApiKeysFeature>();
+
+        var dict = request.ToObjectDictionary();
+        var updateModel = new Dictionary<string, object?>();
+        var reset = (request.Reset ?? []).ToSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in dict)
+        {
+            if (entry.Key == nameof(request.Reset)) continue;
+            if (entry.Value != null || reset.Contains(entry.Key))
+            {
+                updateModel[entry.Key] = entry.Value;
+            }
+        }
+        if (request.Scopes is { Count: > 0 })
+        {
+            updateModel[nameof(request.Scopes)] = request.Scopes.Where(x => feature.UserScopes.Contains(x)).ToList();
+        }
+        if (request.Features is { Count: > 0 })
+        {
+            updateModel[nameof(request.Features)] = request.Features.Where(x => feature.UserFeatures.Contains(x)).ToList();
+        }
+        
+        if (updateModel.Count > 0)
+        {
+            await Db.UpdateAsync<ApiKeysFeature.ApiKey>(updateModel, 
+                x => x.Id == request.Id && x.UserId == userId);
+        }
+        return new EmptyResponse();
+    }
+
+    public async Task<object> Any(DeleteUserApiKey request)
+    {
+        var (userId, _) = GetUserIdAndUserName();
+        await Db.DeleteAsync<ApiKeysFeature.ApiKey>(x => x.Id == request.Id && x.UserId == userId);
+        return new EmptyResponse();
+    }
+}
 #endif
