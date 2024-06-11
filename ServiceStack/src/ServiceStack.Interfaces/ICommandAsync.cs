@@ -10,15 +10,17 @@ public interface IAsyncCommand<in T> : IAsyncCommand
 }
 public interface IAsyncCommand { }
 
-public interface IHasResult<T>
+public interface IHasResult<out T>
 {
-    T Result { get; set; }
+    T Result { get; }
 }
+public interface IAsyncCommand<in TRequest, out TResult> : IAsyncCommand<TRequest>, IHasResult<TResult> { }
 
 public interface ICommandExecutor
 {
     TCommand Command<TCommand>() where TCommand : IAsyncCommand;
     Task ExecuteAsync<TRequest>(IAsyncCommand<TRequest> command, TRequest request);
+    Task<TResult> ExecuteWithResultAsync<TRequest, TResult>(IAsyncCommand<TRequest, TResult> command, TRequest request);
 }
 
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]

@@ -14,6 +14,7 @@ using ServiceStack.Data;
 using ServiceStack.DataAnnotations;
 using ServiceStack.Host;
 using ServiceStack.OrmLite;
+using ServiceStack.Text;
 using ServiceStack.Web;
 
 namespace ServiceStack;
@@ -24,7 +25,7 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
     public string AdminRole { get; set; } = RoleNames.Admin;
 
     public string? ApiKeyPrefix = "ak-";
-    public string? HttpHeader = "x-api-key";
+    public string? HttpHeader = HttpHeaders.XApiKey;
     public TimeSpan? CacheDuration = TimeSpan.FromMinutes(10);
     public Func<string>? ApiKeyGenerator { get; set; }
     public TimeSpan? DefaultExpiry { get; set; }
@@ -49,6 +50,11 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
     public List<string> Features { get; set; } = [];
 
     /// <summary>
+    /// Hide 'RestrictTo' field from User API Key UI
+    /// </summary>
+    public List<string> Hide { get; set; } = [];
+
+    /// <summary>
     /// Available Scopes Users can assign to their own API Keys
     /// </summary>
     public List<string> UserScopes { get; set; } = [];
@@ -57,6 +63,11 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
     /// Available Features Users can assign to their own API Keys
     /// </summary>
     public List<string> UserFeatures { get; set; } = [];
+
+    /// <summary>
+    /// Hide 'RestrictTo' field from User API Key UI
+    /// </summary>
+    public List<string> UserHide { get; set; } = [];
     
     public List<KeyValuePair<string, string>> ExpiresIn { get; set; } = [
         new("", "Never"),
@@ -116,6 +127,11 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
 
         public List<string> Features { get; set; } = [];
 
+        /// <summary>
+        /// Restricted to only access specific APIs
+        /// </summary>
+        public List<string> RestrictTo { get; set; } = [];
+
         public string? Environment { get; set; }
 
         public string? Notes { get; set; }
@@ -126,6 +142,7 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
         
         public bool HasScope(string scope) => Scopes.Contains(scope);
         public bool HasFeature(string feature) => Features.Contains(feature);
+        public bool CanAccess(Type requestType) => RestrictTo.IsEmpty() || RestrictTo.Contains(requestType.Name);
 
         public Dictionary<string, string>? Meta { get; set; }
     }
@@ -154,6 +171,7 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
                 Scopes = Scopes,
                 Features = Features,
                 ExpiresIn = ExpiresIn,
+                Hide = Hide,
             };
         });
     }
@@ -167,12 +185,21 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
             Scopes = UserScopes,
             Features = UserFeatures,
             ExpiresIn = ExpiresIn,
+            Hide = UserHide,
+            RequestTypes = HostContext.Metadata.Operations
+                .Where(x => x.RequiresApiKey)
+                .Select(x => x.RequestType.Name)
+                .OrderBy(x => x)
+                .ToList(),
         };
     }
 
     public PartialApiKey ToPartialApiKey(ApiKey apiKey)
     {
         var to = apiKey.ConvertTo<PartialApiKey>();
+        to.Scopes ??= [];
+        to.Features ??= [];
+        to.RestrictTo ??= [];
         to.Active = apiKey.CancelledDate == null && (apiKey.ExpiryDate == null || apiKey.ExpiryDate > DateTime.UtcNow);
         return to;
     }
@@ -296,6 +323,12 @@ public class ApiKeysFeature : IPlugin, IConfigureServices, IRequiresSchema, Mode
         apiKeys.ForEach(InitKey);
         await db.InsertAllAsync(apiKeys);
     }
+    
+    public ApiKey? GetApiKey(IDbConnection db, string key) => db.Single<ApiKey>(x => x.Key == key);
+    public async Task<ApiKey?> GetApiKeyAsync(IDbConnection db, string key) => await db.SingleAsync<ApiKey>(x => x.Key == key).ConfigAwait();
+
+    public ApiKey? GetApiKeyById(IDbConnection db, int id) => db.SingleById<ApiKey>(id);
+    public async Task<ApiKey?> GetApiKeyByIdAsync(IDbConnection db, int id) => await db.SingleByIdAsync<ApiKey>(id).ConfigAwait();
 
     public void Configure(IServiceCollection services)
     {
@@ -415,8 +448,13 @@ public class AdminApiKeysService(IDbConnectionFactory dbFactory) : Service
         foreach (var entry in dict)
         {
             if (entry.Key == nameof(request.Reset)) continue;
-            if (entry.Value != null || reset.Contains(entry.Key))
+            if (reset.Contains(entry.Key))
             {
+                updateModel[entry.Key] = null;
+            }
+            else if (entry.Value != null)
+            {
+                if (entry.Value is List<string> { Count: 0 }) continue;
                 updateModel[entry.Key] = entry.Value;
             }
         }
@@ -517,8 +555,13 @@ public class UserApiKeysService(IDbConnectionFactory dbFactory) : Service
         foreach (var entry in dict)
         {
             if (entry.Key == nameof(request.Reset)) continue;
-            if (entry.Value != null || reset.Contains(entry.Key))
+            if (reset.Contains(entry.Key))
             {
+                updateModel[entry.Key] = null;
+            }
+            else if (entry.Value != null)
+            {
+                if (entry.Value is List<string> { Count: 0 }) continue;
                 updateModel[entry.Key] = entry.Value;
             }
         }

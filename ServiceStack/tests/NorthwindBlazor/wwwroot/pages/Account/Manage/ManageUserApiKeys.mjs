@@ -4,6 +4,7 @@ import { useClient, useUtils, useFormatters, useMetadata, css } from "@servicest
 import { QueryUserApiKeys, CreateUserApiKey, UpdateUserApiKey, DeleteUserApiKey } from "./dtos.mjs"
 
 function arraysAreEqual(a, b) {
+    if (!a || !b) return false
     return a.length === b.length && a.every((v, i) => v === b[i])
 }
 
@@ -57,6 +58,7 @@ const CreateApiKeyForm = {
           </div>
         </ModalDialog>
         <form v-else @submit="submit" :class="css.card.panelClass">
+          <input type="submit" class="hidden">
           <div class="bg-white dark:bg-black relative">
             <CloseButton class="sm:block" @close="$emit('done')" />
             <div class="">
@@ -70,6 +72,9 @@ const CreateApiKeyForm = {
                       </div>
                       <div class="col-span-6 sm:col-span-3">
                         <SelectInput id="expiresIn" v-model="expiresIn" :entries="info.expiresIn" />
+                      </div>
+                      <div v-if="!info.hide.includes('RestrictTo')" class="col-span-6">
+                        <TagInput id="restrictTo" label="Restrict to APIs" v-model="request.restrictTo" :allowableValues="apiKeyApis" />
                       </div>
                       <div v-if="info.scopes.length" class="col-span-6">
                         <div class="mb-2">
@@ -87,7 +92,7 @@ const CreateApiKeyForm = {
                           <CheckboxInput v-for="feature in info.features" :id="feature" :label="feature" v-model="features[feature]" />
                         </div>
                       </div>
-                      <div class="col-span-6">
+                      <div v-if="!info.hide.includes('Notes')" class="col-span-6">
                         <TextareaInput id="notes" v-model="request.notes" placeholder="Optional Notes about this API Key" class="h-24" />
                       </div>
                     </div>
@@ -125,6 +130,7 @@ const CreateApiKeyForm = {
         const features = ref({})
         const api = ref(new ApiResult())
         const errorSummary = computed(() => api.value.summaryMessage())
+        const apiKeyApis = computed(() => props.info.requestTypes)
         
         async function submit(e) {
             e.preventDefault()
@@ -156,7 +162,7 @@ const CreateApiKeyForm = {
             emit('done')
         }
         
-        return { request, expiresIn, scopes, features, api, errorSummary, submit, css, apiKey, done }
+        return { request, expiresIn, scopes, features, api, errorSummary, css, apiKey, apiKeyApis, done, submit }
     }
 }
 
@@ -164,6 +170,7 @@ const EditApiKeyForm = {
     template:`
         <div>
           <form @submit="submit" :class="css.card.panelClass">
+            <input type="submit" class="hidden">
             <div class="bg-white dark:bg-black relative">
               <CloseButton class="sm:block" @close="$emit('done')" />
               <div class="">
@@ -177,6 +184,9 @@ const EditApiKeyForm = {
                         </div>
                         <div class="col-span-6 sm:col-span-3">
                           <TextInput id="expiryDate" type="date" v-model="request.expiryDate" />
+                        </div>
+                        <div v-if="!info.hide.includes('RestrictTo')" class="col-span-6">
+                          <TagInput id="restrictTo" label="Restrict to APIs" v-model="request.restrictTo" :allowableValues="apiKeyApis" />
                         </div>
                         <div v-if="info.scopes.length" class="col-span-6">
                           <div class="mb-2">
@@ -194,11 +204,11 @@ const EditApiKeyForm = {
                             <CheckboxInput v-for="feature in info.features" :id="feature" :label="feature" v-model="features[feature]" />
                           </div>
                         </div>
-                        <div class="col-span-6">
+                        <div v-if="!info.hide.includes('Notes')" class="col-span-6">
                           <TextareaInput id="notes" v-model="request.notes" placeholder="Optional Notes about this API Key" class="h-24" />
                         </div>
                       </div>
-                      <div class="col-span-6">
+                      <div class="mt-2 col-span-6">
                         <div v-if="request.cancelledDate" class="flex items-center">
                             <div class="text-red-500">Disabled on {{formatDate(request.cancelledDate)}}</div>
                             <SecondaryButton @click="submitEnable" class="ml-4">Enable API Key</SecondaryButton>
@@ -238,6 +248,7 @@ const EditApiKeyForm = {
         const features = ref({})
         const api = ref(new ApiResult())
         const errorSummary = computed(() => api.value.summaryMessage())
+        const apiKeyApis = computed(() => props.info.requestTypes)
 
         async function submit(e) {
             e.preventDefault()
@@ -257,16 +268,22 @@ const EditApiKeyForm = {
                 }
             })
 
-            ;['name','expiryDate','scopes','features','notes'].forEach(k => {
+            ;['name','expiryDate','scopes','features','restrictTo','notes'].forEach(k => {
                 const value = request.value[k]
                 const origValue = origValues[k]
+                console.log(k, value, origValue, Array.isArray(value) ? arraysAreEqual(value, origValue) : -1)
                 if (value === origValue) return
                 if (Array.isArray(value)) {
                     if (!origValue || !arraysAreEqual(value, origValue)) {
-                        update[k] = value
+                        if (value.length === 0) {
+                            update.reset ??= []
+                            update.reset.push(k)
+                        } else {
+                            update[k] = value
+                        }
                     }
                 }
-                if (value) {
+                else if (value) {
                     update[k] = value
                 } else {
                     update.reset ??= []
@@ -317,11 +334,11 @@ const EditApiKeyForm = {
                 request.value.expiryDate = request.value.expiryDate
                     ? dateInputFormat(toDate(request.value.expiryDate))
                     : null
-                origValues = { ...request.value }
+                origValues = { ...result }
             }
         })
         
-        return { css, request, scopes, features, errorSummary, formatDate,
+        return { css, request, scopes, features, errorSummary, formatDate, apiKeyApis,
             submit, submitDelete, submitDisable, submitEnable }
     }
 }
