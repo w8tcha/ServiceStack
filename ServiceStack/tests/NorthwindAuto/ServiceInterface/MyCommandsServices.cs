@@ -22,7 +22,7 @@ public class MyCommands
 
 [Retry]
 [Tag("Todo")]
-public class AddTodoCommand(IDbConnection db) : IAsyncCommand<CreateTodo,Todo?>
+public class AddTodoCommand(ILogger<AddTodoCommand> log, IDbConnection db) : IAsyncCommand<CreateTodo,Todo?>
 {
     public Todo? Result { get; private set; }
     
@@ -30,9 +30,49 @@ public class AddTodoCommand(IDbConnection db) : IAsyncCommand<CreateTodo,Todo?>
     {
         var newTodo = request.ConvertTo<Todo>();
         newTodo.Id = await db.InsertAsync(newTodo, selectIdentity:true);
+        log.LogDebug("Created Todo {Id}: {Text}", newTodo.Id, newTodo.Text);
         Result = newTodo;
     }
 }
+
+[Tag("Todo")]
+public class UpdateTodoCommand : IAsyncCommand<CreateTodo>
+{
+    public async Task ExecuteAsync(CreateTodo request) {}
+}
+[Tag("Todo")]
+public class DeleteTodoCommand : IAsyncCommand<CreateTodo>
+{
+    public async Task ExecuteAsync(CreateTodo request) {}
+}
+
+[Tag("Bookings")]
+public class AddBookingCommand : IAsyncCommand<CreateTodo>
+{
+    public async Task ExecuteAsync(CreateTodo request) {}
+}
+[Tag("Bookings")]
+public class UpdateBookingCommand : IAsyncCommand<CreateTodo>
+{
+    public async Task ExecuteAsync(CreateTodo request) {}
+}
+[Tag("Bookings")]
+public class DeleteBookingCommand : IAsyncCommand<CreateTodo>
+{
+    public async Task ExecuteAsync(CreateTodo request) {}
+}
+
+[Lifetime(Lifetime.Scoped)]
+public class AddOneWayTodoCommand(ILogger<AddTodoCommand> log, IDbConnection db) : IAsyncCommand<CreateTodo>
+{
+    public async Task ExecuteAsync(CreateTodo request)
+    {
+        var newTodo = request.ConvertTo<Todo>();
+        newTodo.Id = await db.InsertAsync(newTodo, selectIdentity:true);
+        log.LogDebug("Created Todo {Id}: {Text}", newTodo.Id, newTodo.Text);
+    }
+}
+
 
 public class FailedRequest {}
 
