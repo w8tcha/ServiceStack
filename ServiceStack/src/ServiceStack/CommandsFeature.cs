@@ -29,7 +29,11 @@ namespace ServiceStack;
 public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreInitPlugin
 {
     public string Id => Plugins.AdminCommands;
-    public string AdminRole { get; set; } = RoleNames.Admin;
+
+    /// <summary>
+    /// Limit API access to users in role
+    /// </summary>
+    public string AccessRole { get; set; } = RoleNames.Admin;
 
     public const int DefaultCapacity = 250;
     public int ResultsCapacity { get; set; } = DefaultCapacity;
@@ -60,11 +64,6 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
     ];
     
     public Func<CommandResult,bool>? ShouldIgnore { get; set; }
-
-    /// <summary>
-    /// Limit API access to users in role
-    /// </summary>
-    public string AccessRole { get; set; } = RoleNames.Admin;
 
     public List<Type> RegisterServices { get; set; } = [
         typeof(CommandsService),
@@ -236,7 +235,7 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
 
     public async Task<CommandResult> ExecuteCommandAsync(Type commandType, Func<object,Task> execFn, object requestDto)
     {
-        var result = new CommandResult { Type = CommandType.Command, Name = commandType.Name, At = DateTime.UtcNow };
+        var result = new CommandResult { Type = CommandResult.Command, Name = commandType.Name, At = DateTime.UtcNow };
         RetryPolicy? retryPolicy = null;
         var retries = 0;
         var sw = Stopwatch.StartNew();
@@ -419,7 +418,7 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
         {
             AddCommandResult(new()
             {
-                Type = CommandType.Api,
+                Type = CommandResult.Api,
                 Name = name,
                 Ms = ms,
                 At = DateTime.UtcNow,
@@ -429,7 +428,7 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
         {
             AddCommandResult(new()
             {
-                Type = CommandType.Api,
+                Type = CommandResult.Api,
                 Name = name,
                 Ms = ms,
                 At = DateTime.UtcNow,
@@ -487,21 +486,18 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
                 Id = "commands",
                 Label = "Commands",
                 Icon = Svg.ImageSvg(Svg.Create(Svg.Body.Command)),
-                Show = $"role:{AdminRole}",
+                Show = $"role:{AccessRole}",
             });
         });
     }
 }
 
-public static class CommandType
+public class CommandResult
 {
     public const string Command = "CMD";
     public const string Api = "API";
-}
 
-public class CommandResult
-{
-    public string Type { get; set; } = CommandType.Command;
+    public string Type { get; set; } = Command;
     public string Name { get; set; }
     public long? Ms { get; set; }
     public DateTime At { get; set; }
@@ -523,7 +519,7 @@ public class CommandResult
 
 public class CommandSummary
 {
-    public string Type { get; set; } = CommandType.Command;
+    public string Type { get; set; } = CommandResult.Command;
     public string Name { get; set; }
     public int Count { get; set; }
     public int Failed { get; set; }
