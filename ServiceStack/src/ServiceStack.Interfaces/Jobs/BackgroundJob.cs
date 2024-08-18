@@ -120,8 +120,8 @@ public class BackgroundJob : BackgroundJobBase
 
     [Ignore] public bool Transient { get; set; }
     [Ignore] public CompletedJob? ParentJob { get; set; }
-    [Ignore] public Action<object?>? OnSuccess { get; set; }
-    [Ignore] public Action<Exception>? OnFailed { get; set; }
+    [Ignore, IgnoreDataMember] public Action<object?>? OnSuccess { get; set; }
+    [Ignore, IgnoreDataMember] public Action<Exception>? OnFailed { get; set; }
 }
 
 [Icon(Svg = SvgIcons.Stats)]
@@ -135,6 +135,7 @@ public class JobSummary
     public virtual DateTime CreatedDate { get; set; }
     public virtual string? CreatedBy { get; set; }
     public virtual string RequestType { get; set; } // API or CMD
+    public virtual string? Command { get; set; }
     public virtual string Request { get; set; }
     public virtual string? Response { get; set; }
     public virtual string? UserId { get; set; }

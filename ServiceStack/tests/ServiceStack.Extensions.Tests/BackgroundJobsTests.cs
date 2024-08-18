@@ -19,7 +19,6 @@ using ServiceStack.Data;
 using ServiceStack.IO;
 using ServiceStack.Jobs;
 using ServiceStack.OrmLite;
-using ServiceStack.Text;
 using ServiceStack.Web;
 
 namespace ServiceStack.Extensions.Tests;
@@ -33,34 +32,42 @@ public class MyResponse
     public required string Result { get; set; }
 }
 
-class MyJobCommand(IBackgroundJobs jobs) : IAsyncCommand<MyRequest,MyResponse>, IRequiresRequest
+class MyJobCommand(IBackgroundJobs jobs) : AsyncCommandWithResult<MyRequest,MyResponse>
 {
     public static long Count;
     public static IRequest? LastRequest { get; set; }
     public static List<MyRequest> Requests { get; set; } = new();
-    public IRequest? Request { get; set; }
 
-    public MyResponse? Result { get; set; }
-
-    public async Task ExecuteAsync(MyRequest request)
+    protected override Task<MyResponse> RunAsync(MyRequest request)
     {
         jobs.UpdateBackgroundJobStatus(Request, 0.1, "Started", "MyCommand Started...");
         Interlocked.Increment(ref Count);
         LastRequest = Request;
         Requests.Add(request);
-        Result = new MyResponse { Result = $"Hello {request.Id}" };
+        jobs.UpdateBackgroundJobStatus(Request, 0.9, "Finished", "MyCommand Finished");
+        return new MyResponse { Result = $"Hello {request.Id}" }.InTask();
+    }
+}
+
+class MySyncCommand(IBackgroundJobs jobs) : SyncCommand
+{
+    public static long Count;
+    public static IRequest? LastRequest { get; set; }
+    protected override void Run()
+    {
+        jobs.UpdateBackgroundJobStatus(Request, 0.1, "Started", "MyCommand Started...");
+        Interlocked.Increment(ref Count);
+        LastRequest = Request;
         jobs.UpdateBackgroundJobStatus(Request, 0.9, "Finished", "MyCommand Finished");
     }
 }
 
-class MyJobCallback(IBackgroundJobs jobs) : IAsyncCommand<MyResponse>, IRequiresRequest
+class MyJobCallback(IBackgroundJobs jobs) : SyncCommand<MyResponse>
 {
     public static long Count;
     public static IRequest? LastRequest { get; set; }
     public static MyResponse? LastMyResponse { get; set; }
-    public IRequest? Request { get; set; }
-
-    public async Task ExecuteAsync(MyResponse request)
+    protected override void Run(MyResponse request)
     {
         Interlocked.Increment(ref Count);
         LastRequest = Request;
@@ -68,7 +75,7 @@ class MyJobCallback(IBackgroundJobs jobs) : IAsyncCommand<MyResponse>, IRequires
     }
 }
 
-public class JobServices : Service
+public class JobServices(IBackgroundJobs jobs) : Service
 {
     public static long Count;
     public static IRequest? LastRequest { get; set; }
@@ -76,30 +83,31 @@ public class JobServices : Service
 
     public object Any(MyRequest request)
     {
+        jobs.UpdateBackgroundJobStatus(Request, 0.1, "Started", "My API Started...");
         Interlocked.Increment(ref Count);
         LastRequest = Request;
         Requests.Add(request);
+        jobs.UpdateBackgroundJobStatus(Request, 0.9, "Finished", "My API Finished");
         return new MyResponse { Result = $"Hello {request.Id}" };
+    }
+
+    public object Any(AlwaysFails request)
+    {
+        Interlocked.Increment(ref Count);
+        throw new Exception("Always Fails: " + Count);
     }
 }
 
-public class AlwaysFail
-{
-    public int Id { get; set; }
-}
+public class AlwaysFails : IReturn<EmptyResponse> {}
 
-public class AlwaysFailCommand : IAsyncCommand<AlwaysFail>
+public class AlwaysFailCommand : SyncCommand
 {
     public static long Count;
     public static IRequest? LastRequest { get; set; }
-    public static AlwaysFail? LastCommandRequest { get; set; }
-    public IRequest? Request { get; set; }
-
-    public Task ExecuteAsync(AlwaysFail request)
+    protected override void Run()
     {
-        Interlocked.Increment(ref Count);
         LastRequest = Request;
-        LastCommandRequest = request;
+        Interlocked.Increment(ref Count);
         throw new Exception("Always Fails: " + Count);
     }
 }
@@ -114,50 +122,40 @@ public class DependentJobResult
     public CompletedJob? ParentJob { get; set; }
 }
 
-public class DependentJobCommand : IAsyncCommand<DependentJob,DependentJobResult>, IRequiresRequest
+public class DependentJobCommand : SyncCommandWithResult<DependentJob,DependentJobResult>
 {
     public static long Count;
     public static IRequest? LastRequest { get; set; }
     public static DependentJob? LastCommandRequest { get; set; }
-    public IRequest? Request { get; set; }
-
-    public DependentJobResult Result { get; set; }
-
-    public async Task ExecuteAsync(DependentJob request)
+    protected override DependentJobResult Run(DependentJob request)
     {
         Interlocked.Increment(ref Count);
         LastRequest = Request;
         LastCommandRequest = request;
-        var job = Request.AssertBackgroundJob();
-        Result = new() { Id = request.Id, ParentJob = job.ParentJob };
+        var job = Request.GetBackgroundJob();
+        return new() { Id = request.Id, ParentJob = job.ParentJob };
     }
 }
 
-public class DependentJobCallbackCommand : IAsyncCommand<DependentJobResult>
+public class DependentJobCallbackCommand : SyncCommand<DependentJobResult>
 {
     public static List<DependentJobResult> Results { get; set; } = new();
-    public async Task ExecuteAsync(DependentJobResult request)
-    {
-        Results.Add(request);
-    }
+    protected override void Run(DependentJobResult request) => Results.Add(request);
 }
 
 public class ScopedRequest : IReturn<ApplicationUser>
 {
     public string UserId { get; set; }
 }
-class MyScopedCommand(IBackgroundJobs jobs, UserManager<ApplicationUser> userManager) : IAsyncCommand<ScopedRequest,ApplicationUser>, IRequiresRequest
+class MyScopedCommand(IBackgroundJobs jobs, UserManager<ApplicationUser> userManager) : AsyncCommandWithResult<ScopedRequest,ApplicationUser?>
 {
     public static long Count;
     public static IRequest? LastRequest { get; set; }
     public static List<ScopedRequest> Requests { get; set; } = new();
-    public IRequest? Request { get; set; }
     public static ClaimsPrincipal? LastUser { get; set; }
     public static IAuthSession? LastSession { get; set; }
     public static ApplicationUser? LastResult { get; set; }
-    public ApplicationUser? Result { get; set; }
-
-    public async Task ExecuteAsync(ScopedRequest request)
+    protected override async Task<ApplicationUser?> RunAsync(ScopedRequest request)
     {
         jobs.UpdateBackgroundJobStatus(Request, 0.1, "Started", "MyScopedCommand Started...");
         Interlocked.Increment(ref Count);
@@ -165,8 +163,8 @@ class MyScopedCommand(IBackgroundJobs jobs, UserManager<ApplicationUser> userMan
         LastUser = Request.GetClaimsPrincipal();
         LastSession = await Request.GetSessionAsync();
         Requests.Add(request);
-        Result = LastResult = await userManager.FindByIdAsync(request.UserId);;
         jobs.UpdateBackgroundJobStatus(Request, 0.9, "Finished", "MyScopedCommand Finished");
+        return LastResult = await userManager.FindByIdAsync(request.UserId);
     }
 }
 
@@ -308,10 +306,9 @@ public class BackgroundJobsTests
         JobServices.Count = 0;
         JobServices.LastRequest = null;
         JobServices.Requests.Clear();
-        
+
+        MySyncCommand.Count = 0;
         AlwaysFailCommand.Count = 0;
-        AlwaysFailCommand.LastRequest = null;
-        AlwaysFailCommand.LastCommandRequest = null;
         
         DependentJobCommand.Count = 0;
         DependentJobCommand.LastRequest = null;
@@ -335,6 +332,7 @@ public class BackgroundJobsTests
         using var db = feature.OpenJobsDb();
         db.DeleteAllAsync<BackgroundJob>();
         db.DeleteAllAsync<JobSummary>();
+        db.DeleteAllAsync<ScheduledTask>();
         using var monthDb = feature.OpenJobsMonthDb(DateTime.UtcNow);
         monthDb.DeleteAllAsync<CompletedJob>();
         monthDb.DeleteAllAsync<FailedJob>();
@@ -346,7 +344,7 @@ public class BackgroundJobsTests
         Assert.That(job.Id, Is.GreaterThan(0));
         Assert.That(job.CreatedDate, Is.Not.Null);
         Assert.That(job.RequestId, Is.Not.Null);
-        Assert.That(job.Request, Is.EqualTo(nameof(MyRequest)));
+        Assert.That(job.Request, Is.EqualTo(nameof(MyRequest)).Or.EqualTo(nameof(NoArgs)));
         Assert.That(job.RequestBody, Is.Not.Null);
         Assert.That(job.LastActivityDate, Is.Not.Null);
     }
@@ -371,32 +369,65 @@ public class BackgroundJobsTests
     public void Does_execute_MyRequest_Api()
     {
         ResetState();
-        feature.Jobs.EnqueueApi(new MyRequest { Id = 2 });
+        var jobRef = feature.Jobs.EnqueueApi(new MyRequest { Id = 2 });
         
         Assert.That(ExecUtils.WaitUntilTrue(() => JobServices.LastRequest != null), "LastRequest == null");
         Assert.That(JobServices.Requests.Count, Is.GreaterThan(0));
         var job = JobServices.LastRequest.GetBackgroundJob();
-        Assert.That(job!.RequestType, Is.EqualTo(CommandResult.Api));
+        Assert.That(job.RequestType, Is.EqualTo(CommandResult.Api));
         AssertNotNulls(job);
+
+        JobResult? jobResult = null;
+        Assert.That(ExecUtils.WaitUntilTrue(() =>
+        {
+            jobResult = feature.Jobs.GetJob(jobRef.Id);
+            return jobResult?.Completed != null;
+        }), "jobResult.Completed == null");
+        Assert.That(jobResult!.Summary, Is.Not.Null);
+        Assert.That(jobResult!.Completed, Is.Not.Null);
+        
+        var request = feature.Jobs.CreateRequest(jobResult) as MyRequest;
+        Assert.That(request, Is.Not.Null);
+        Assert.That(request!.Id, Is.EqualTo(2));
+
+        var response = feature.Jobs.CreateResponse(jobResult) as MyResponse;
+        Assert.That(response, Is.Not.Null);
+        Assert.That(response!.Result, Is.EqualTo($"Hello 2"));
     }
 
     [Test]
-    public void Does_execute_Transient_Command()
+    public void Does_Run_Transient_Command()
     {
         ResetState();
-        var job = feature.Jobs.ExecuteTransientCommand<MyJobCommand>(new MyRequest { Id = 1 }, new() { Worker = "app.db" });
+        List<MyResponse> responses = new();
+        List<Exception> errors = new();
+        var job = feature.Jobs.RunCommand<MyJobCommand>(new MyRequest { Id = 1 }, new() {
+            Worker = "app.db",
+            OnSuccess = r => responses.Add((MyResponse)r!),
+            OnFailed = e => errors.Add(e),
+        });
         Assert.That(job.Worker, Is.EqualTo("app.db"));
         
         Assert.That(ExecUtils.WaitUntilTrue(() => MyJobCommand.LastRequest != null), "LastRequest == null");
         Assert.That(MyJobCommand.Requests.Count, Is.GreaterThan(0));
         job = MyJobCommand.LastRequest.GetBackgroundJob();
-        Assert.That(job!.RequestType, Is.EqualTo(CommandResult.Command));
+        Assert.That(job.RequestType, Is.EqualTo(CommandResult.Command));
         Assert.That(job.Id, Is.EqualTo(0));
-        job!.Id = int.MaxValue;
+        job.Id = int.MaxValue;
         AssertNotNulls(job);
         Assert.That(job.Status, Is.EqualTo("Finished"));
         Assert.That(ExecUtils.WaitUntilTrue(() => job.Progress >= 1), "job.Progress != 1");
         Assert.That(job.Logs, Is.EqualTo("MyCommand Started...\nMyCommand Finished"));
+        Assert.That(responses.Count, Is.EqualTo(1));
+        Assert.That(errors.Count, Is.EqualTo(0));
+
+        job = feature.Jobs.RunCommand<AlwaysFailCommand>(new()
+        {
+            Worker = "app.db",
+            OnSuccess = r => responses.Add((MyResponse)r!),
+            OnFailed = e => errors.Add(e),
+        });
+        Assert.That(ExecUtils.WaitUntilTrue(() => errors.Count == 1), "errors.Count != 1");
     }
 
     [Test]
@@ -544,7 +575,7 @@ public class BackgroundJobsTests
         var timeout = TimeSpan.FromMinutes(1);
         var callbackCount = 0;
         Exception? callbackEx = null;
-        var jobRef = feature.Jobs.EnqueueCommand<AlwaysFailCommand>(new AlwaysFail { Id = 1 }, new() {
+        var jobRef = feature.Jobs.EnqueueCommand<AlwaysFailCommand>(new() {
             OnFailed = ex => {
                 callbackCount++;
                 callbackEx = ex;
@@ -564,8 +595,8 @@ public class BackgroundJobsTests
         }, timeout), "failedJob == null");
         Assert.That(failedJob!.RefId, Is.EqualTo(jobRef.RefId));
         Assert.That(failedJob.Command, Is.EqualTo(nameof(AlwaysFailCommand)));
-        Assert.That(failedJob.Request, Is.EqualTo(nameof(AlwaysFail)));
-        Assert.That(failedJob.RequestBody, Is.EqualTo("{\"id\":1}"));
+        Assert.That(failedJob.Request, Is.EqualTo(nameof(NoArgs)));
+        Assert.That(failedJob.RequestBody, Is.EqualTo("{}"));
         Assert.That(failedJob.Attempts, Is.EqualTo(3));
         Assert.That(failedJob.State, Is.EqualTo(BackgroundJobState.Failed));
         Assert.That(failedJob.ErrorCode, Is.EqualTo(nameof(Exception)));
@@ -573,7 +604,54 @@ public class BackgroundJobsTests
 
         var summary = db.SingleById<JobSummary>(jobRef.Id);
         Assert.That(summary!.RefId, Is.EqualTo(jobRef.RefId));
-        Assert.That(summary.Request, Is.EqualTo(nameof(AlwaysFail)));
+        Assert.That(summary.Request, Is.EqualTo(nameof(NoArgs)));
+        Assert.That(summary.Attempts, Is.EqualTo(3));
+        Assert.That(summary.State, Is.EqualTo(BackgroundJobState.Failed));
+        Assert.That(summary.ErrorCode, Is.EqualTo(nameof(Exception)));
+        Assert.That(summary.ErrorMessage, Is.EqualTo("Always Fails: 3"));
+        
+        Assert.That(callbackCount, Is.EqualTo(1));
+        // Only first exception is executed
+        Assert.That(callbackEx!.Message, Is.EqualTo("Always Fails: 1"));
+    }
+
+    [Test]
+    public async Task Does_retry_and_fail_AlwaysFails_Api()
+    {
+        ResetState();
+        var timeout = TimeSpan.FromMinutes(1);
+        var callbackCount = 0;
+        Exception? callbackEx = null;
+        var jobRef = feature.Jobs.EnqueueApi(new AlwaysFails(), new() {
+            OnFailed = ex => {
+                callbackCount++;
+                callbackEx = ex;
+            }
+        });
+        Assert.That(await ExecUtils.WaitUntilTrueAsync(() => JobServices.Count >= 3, timeout), "JobServices.Count < 3");
+        Assert.That(JobServices.Count, Is.EqualTo(3));
+
+        using var db = feature.OpenJobsDb();
+        
+        using var monthDb = feature.OpenJobsMonthDb(DateTime.UtcNow);
+
+        FailedJob? failedJob = null;
+        Assert.That(await ExecUtils.WaitUntilTrueAsync(() => {
+            failedJob = monthDb.SingleById<FailedJob>(jobRef.Id);
+            return failedJob != null;
+        }, timeout), "failedJob == null");
+        Assert.That(failedJob!.RefId, Is.EqualTo(jobRef.RefId));
+        Assert.That(failedJob.Command, Is.Null);
+        Assert.That(failedJob.Request, Is.EqualTo(nameof(AlwaysFails)));
+        Assert.That(failedJob.RequestBody, Is.EqualTo("{}"));
+        Assert.That(failedJob.Attempts, Is.EqualTo(3));
+        Assert.That(failedJob.State, Is.EqualTo(BackgroundJobState.Failed));
+        Assert.That(failedJob.ErrorCode, Is.EqualTo(nameof(Exception)));
+        Assert.That(failedJob.Error!.Message, Is.EqualTo("Always Fails: 3"));
+
+        var summary = db.SingleById<JobSummary>(jobRef.Id);
+        Assert.That(summary!.RefId, Is.EqualTo(jobRef.RefId));
+        Assert.That(summary.Request, Is.EqualTo(nameof(AlwaysFails)));
         Assert.That(summary.Attempts, Is.EqualTo(3));
         Assert.That(summary.State, Is.EqualTo(BackgroundJobState.Failed));
         Assert.That(summary.ErrorCode, Is.EqualTo(nameof(Exception)));
@@ -606,7 +684,7 @@ public class BackgroundJobsTests
         Assert.That(MyScopedCommand.Requests.Count, Is.GreaterThan(0));
 
         var job = MyScopedCommand.LastRequest.GetBackgroundJob();
-        Assert.That(job!.RequestType, Is.EqualTo(CommandResult.Command));
+        Assert.That(job.RequestType, Is.EqualTo(CommandResult.Command));
         Assert.That(job.Request, Is.EqualTo(nameof(ScopedRequest)));
 
         var principal = MyScopedCommand.LastUser!;
@@ -667,7 +745,7 @@ public class BackgroundJobsTests
         Assert.That(JobScopedServices.Requests.Count, Is.GreaterThan(0));
 
         var job = JobScopedServices.LastRequest.GetBackgroundJob();
-        Assert.That(job!.RequestType, Is.EqualTo(CommandResult.Api));
+        Assert.That(job.RequestType, Is.EqualTo(CommandResult.Api));
         Assert.That(job.Request, Is.EqualTo(nameof(ScopedRequest)));
         
         Assert.That(ExecUtils.WaitUntilTrue(() => JobScopedServices.LastResult != null), "LastResult == null");
@@ -706,5 +784,106 @@ public class BackgroundJobsTests
         Assert.That(response, Is.Not.Null);
         Assert.That(response!.Id, Is.EqualTo(testUser.Id));
         Assert.That(response.UserName, Is.EqualTo(testUser.UserName));
+    }
+
+
+    [Test]
+    public async Task Can_Schedule_Reoccurring_Command()
+    {
+        ResetState();
+
+        using var db = feature.Jobs.OpenJobsDb();
+        var taskName = "My Command Every Minute";
+        var options = new BackgroundJobOptions { Tag = "test" };
+        var startedAt = DateTime.UtcNow;
+
+        ScheduledTask AssertTask(ScheduledTask task)
+        {
+            Assert.That(task.Id, Is.GreaterThan(0));
+            Assert.That(task.Name, Is.EqualTo(taskName));
+            Assert.That(task.RequestType, Is.EqualTo(CommandResult.Command));
+            Assert.That(task.Request, Is.EqualTo(nameof(NoArgs)));
+            Assert.That(task.RequestBody, Is.EqualTo("{}"));
+            Assert.That(task.Interval, Is.Null);
+            Assert.That(task.CronExpression, Is.EqualTo("* * * * *"));
+            return task;
+        }
+
+        feature.Jobs.RecurringCommand<MySyncCommand>(taskName, Schedule.EveryMinute, options);
+
+        var tasks = await db.SelectAsync<ScheduledTask>();
+        Assert.That(tasks.Count, Is.EqualTo(1));
+        var task = AssertTask(tasks[0]);
+        Assert.That(task.Options, Is.Not.Null);
+        
+        feature.Jobs.RecurringCommand<MySyncCommand>(taskName, Schedule.EveryMinute);
+        tasks = await db.SelectAsync<ScheduledTask>();
+        Assert.That(tasks.Count, Is.EqualTo(1));
+        task = AssertTask(tasks[0]);
+        Assert.That(task.Options, Is.Null);
+
+        // First Scheduled Task should execute immediately
+        Assert.That(await ExecUtils.WaitUntilTrueAsync(() => MySyncCommand.Count == 1), "Count != 1");
+        var job = MySyncCommand.LastRequest.GetBackgroundJob();
+        Assert.That(job.RequestType, Is.EqualTo(CommandResult.Command));
+        AssertNotNulls(job);
+        Assert.That(await ExecUtils.WaitUntilTrueAsync(() => job.Status == "Finished"), "Status != Finished");
+        Assert.That(await ExecUtils.WaitUntilTrueAsync(() => job.Progress >= 1), "job.Progress != 1");
+        Assert.That(job.Logs, Is.EqualTo("MyCommand Started...\nMyCommand Finished"));
+        
+        task = await db.SingleAsync<ScheduledTask>(x => x.Name == taskName);
+        Assert.That(task.LastRun, Is.GreaterThan(startedAt));
+        Assert.That(task.LastJobId, Is.EqualTo(job.Id));
+    }
+
+    [Test]
+    public async Task Can_Schedule_Reoccurring_Api()
+    {
+        ResetState();
+
+        using var db = feature.Jobs.OpenJobsDb();
+        var taskName = "My API Every Minute";
+        var options = new BackgroundJobOptions { Tag = "test" };
+        var startedAt = DateTime.UtcNow;
+
+        ScheduledTask AssertTask(ScheduledTask task, MyRequest request)
+        {
+            Assert.That(task.Id, Is.GreaterThan(0));
+            Assert.That(task.Name, Is.EqualTo(taskName));
+            Assert.That(task.RequestType, Is.EqualTo(CommandResult.Api));
+            Assert.That(task.Request, Is.EqualTo(nameof(MyRequest)));
+            Assert.That(task.RequestBody, Is.EqualTo(ClientConfig.ToJson(request)));
+            Assert.That(task.Interval, Is.EqualTo(TimeSpan.FromSeconds(1)));
+            Assert.That(task.CronExpression, Is.Null);
+            return task;
+        }
+
+        feature.Jobs.RecurringApi(taskName, Schedule.Interval(TimeSpan.FromSeconds(1)), 
+            new MyRequest { Id = 1 }, options);
+
+        var tasks = await db.SelectAsync<ScheduledTask>();
+        Assert.That(tasks.Count, Is.EqualTo(1));
+        var task = AssertTask(tasks[0], new MyRequest { Id = 1 });
+        Assert.That(task.Options, Is.Not.Null);
+        
+        feature.Jobs.RecurringApi(taskName, Schedule.Interval(TimeSpan.FromSeconds(1)), new MyRequest { Id = 2 });
+        tasks = await db.SelectAsync<ScheduledTask>();
+        Assert.That(tasks.Count, Is.EqualTo(1));
+        task = AssertTask(tasks[0], new MyRequest { Id = 2 });
+        Assert.That(task.Options, Is.Null);
+
+        // First Scheduled Task should execute immediately
+        Assert.That(await ExecUtils.WaitUntilTrueAsync(() => JobServices.LastRequest != null), "LastRequest == null");
+        Assert.That(JobServices.Requests.Count, Is.EqualTo(1));
+        var job = JobServices.LastRequest.GetBackgroundJob();
+        Assert.That(job.RequestType, Is.EqualTo(CommandResult.Api));
+        AssertNotNulls(job);
+        Assert.That(await ExecUtils.WaitUntilTrueAsync(() => job.Status == "Finished"), "Status != Finished");
+        Assert.That(await ExecUtils.WaitUntilTrueAsync(() => job.Progress >= 1), "job.Progress != 1");
+        Assert.That(job.Logs, Is.EqualTo("My API Started...\nMy API Finished"));
+        
+        task = await db.SingleAsync<ScheduledTask>(x => x.Name == taskName);
+        Assert.That(task.LastRun, Is.GreaterThan(startedAt));
+        Assert.That(task.LastJobId, Is.EqualTo(job.Id));
     }
 }

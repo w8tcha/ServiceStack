@@ -3,15 +3,16 @@
 using System;
 using System.Data;
 using System.Collections.Generic;
+using System.Runtime.Serialization;
 using System.Threading.Tasks;
 
 namespace ServiceStack.Jobs;
 
 public interface IBackgroundJobs
 {
-    BackgroundJobRef EnqueueApi(string requestDto, object request, BackgroundJobOptions? options = null);
+    BackgroundJobRef EnqueueApi(object requestDto, BackgroundJobOptions? options = null);
     BackgroundJobRef EnqueueCommand(string commandName, object arg, BackgroundJobOptions? options = null);
-    BackgroundJob ExecuteTransientCommand(string commandName, object arg, BackgroundJobOptions? options = null);
+    BackgroundJob RunCommand(string commandName, object arg, BackgroundJobOptions? options = null);
     Task ExecuteJobAsync(BackgroundJob job);
     Task CancelJobAsync(BackgroundJob job);
     Task FailJobAsync(BackgroundJob job, Exception ex);
@@ -28,6 +29,9 @@ public interface IBackgroundJobs
     Task<JobResult?> GetJobAsync(long jobId);
     object CreateRequest(BackgroundJobBase job);
     object? CreateResponse(BackgroundJobBase job);
+
+    void RecurringApi(string taskName, Schedule schedule, object requestDto, BackgroundJobOptions? options = null);
+    void RecurringCommand(string taskName, Schedule schedule, string commandName, object arg, BackgroundJobOptions? options = null);
 }
 
 public class BackgroundJobRef(long id, string refId)
@@ -99,13 +103,17 @@ public class BackgroundJobOptions
     /// Associate Job with a tag group
     /// </summary>
     public string? Tag { get; set; }
-    /// <summary>
-    /// Associate Job with a tag group
-    /// </summary>
     public string? CreatedBy { get; set; }
     public int? TimeoutSecs { get; set; }
     public Dictionary<string, string>? Args { get; set; } //= Provider
+
+    /// <summary>
+    /// Whether command should be run and not persisted
+    /// </summary>
+    public bool? RunCommand { get; set; }
+    [IgnoreDataMember]
     public Action<object?>? OnSuccess { get; set; }
+    [IgnoreDataMember]
     public Action<Exception>? OnFailed { get; set; }
 }
 

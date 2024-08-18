@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Data;
-using System.Reflection;
 using ServiceStack.Auth;
 using ServiceStack.Data;
 using ServiceStack.Host;
@@ -13,7 +12,7 @@ using ServiceStack.Web;
 
 namespace ServiceStack.Jobs;
 
-public class BackgroundJobs : IBackgroundJobs
+public partial class BackgroundJobs : IBackgroundJobs
 {
     private static readonly object dbWrites = new();
     readonly ILogger<BackgroundJobs> log;
@@ -37,14 +36,33 @@ public class BackgroundJobs : IBackgroundJobs
         );
     }
 
-    public BackgroundJobRef EnqueueApi(string requestDto, object request, BackgroundJobOptions? options = null)
+    public BackgroundJobRef EnqueueApi(object requestDto, BackgroundJobOptions? options = null)
     {
-        var job = options.ToBackgroundJob(CommandResult.Api, request);
+        var requestType = requestDto.GetType();
+        var serviceType = feature.AppHost.Metadata.GetServiceTypeByRequest(requestType);
+        if (serviceType == null)
+            throw new InvalidOperationException($"API for '{requestType.Name}' not found.");
+        var workerAttr = requestType.FirstAttribute<WorkerAttribute>() ?? serviceType.FirstAttribute<WorkerAttribute>();;
+        if (workerAttr != null)
+        {
+            options ??= new();
+            options.Worker = workerAttr.Name;
+        }
+            
+        var job = options.ToBackgroundJob(CommandResult.Api, requestDto);
         return RecordAndDispatchJob(job);
     }
 
     public BackgroundJobRef EnqueueCommand(string commandName, object arg, BackgroundJobOptions? options = null)
     {
+        var commandInfo = AssertCommand(commandName);
+        var workerAttr = commandInfo.Type.FirstAttribute<WorkerAttribute>();
+        if (workerAttr != null)
+        {
+            options ??= new();
+            options.Worker = workerAttr.Name;
+        }
+
         var job = options.ToBackgroundJob(CommandResult.Command, arg);
         job.Command = commandName;
         return RecordAndDispatchJob(job);
@@ -89,12 +107,20 @@ public class BackgroundJobs : IBackgroundJobs
         return new(job.Id, job.RefId!);
     }
 
-    public BackgroundJob ExecuteTransientCommand(string commandName, object arg, BackgroundJobOptions? options = null)
+    public BackgroundJob RunCommand(string commandName, object arg, BackgroundJobOptions? options = null)
     {
+        var commandInfo = AssertCommand(commandName);
+        var workerAttr = commandInfo.Type.FirstAttribute<WorkerAttribute>();
+        if (workerAttr != null)
+        {
+            options ??= new();
+            options.Worker = workerAttr.Name;
+        }
         var job = options.ToBackgroundJob(CommandResult.Command, arg);
         job.RequestId = Guid.NewGuid().ToString("N");
         job.Command = commandName;
         job.Transient = true;
+        
         DispatchToWorker(job);
         return job;
     }
@@ -114,6 +140,29 @@ public class BackgroundJobs : IBackgroundJobs
         var request = string.IsNullOrEmpty(job.RequestBody)
             ? requestType.CreateInstance()
             : DeserializeFromJson(job.RequestBody, requestType);
+        return request;
+    }
+
+    public object CreateRequestForCommand(string command, string argType, string? argJson)
+    {
+        var requestType = AssertCommand(command).Request?.Type ?? feature.AppHost.Metadata.FindDtoType(argType);
+        if (requestType == null)
+            throw new NotSupportedException($"Request Type for '{argType}' not found.");
+        var request = string.IsNullOrEmpty(argJson)
+            ? requestType.CreateInstance()
+            : DeserializeFromJson(argJson, requestType);
+        return request;
+    }
+
+    public object CreateRequestForApi(string requestType, string? requestJson)
+    {
+        var type = feature.AppHost.Metadata.GetRequestType(requestType) 
+                   ?? feature.AppHost.Metadata.FindDtoType(requestType);
+        if (type == null)
+            throw new NotSupportedException($"Request Type for '{requestType}' not found.");
+        var request = string.IsNullOrEmpty(requestJson)
+            ? type.CreateInstance()
+            : DeserializeFromJson(requestJson, type);
         return request;
     }
     
@@ -223,9 +272,9 @@ public class BackgroundJobs : IBackgroundJobs
 
                 var reqCtx = await CreateRequestContextAsync(scope, request, job);
                 if (command is IRequiresRequest requiresRequest)
-                {
                     requiresRequest.Request = reqCtx;
-                }
+                if (command is IRequiresCancellationToken hasToken)
+                    hasToken.Token = ct;
                 var commandResult = await feature.CommandsFeature.ExecuteCommandAsync(command, reqCtx.Dto);
                 if (commandResult.Exception != null)
                 {
@@ -237,8 +286,19 @@ public class BackgroundJobs : IBackgroundJobs
             else if (job.RequestType == CommandResult.Api)
             {
                 var reqCtx = await CreateRequestContextAsync(scope, request, job);
-                await feature.AppHost.ServiceController.ExecuteMessageAsync(reqCtx.Message, reqCtx, ct);
-                response = reqCtx.Response.Dto;
+                response = await feature.AppHost.ServiceController.ExecuteMessageAsync(reqCtx.Message, reqCtx, ct);
+                if (response is Exception e)
+                {
+                    await FailJobAsync(job, e);
+                    return;
+                }
+                if (response is IHttpError httpError)
+                {
+                    var errorStatus = httpError.Response.GetResponseStatus()
+                        ?? ResponseStatusUtils.CreateResponseStatus(httpError.ErrorCode, httpError.Message, null);
+                    await FailJobAsync(job, errorStatus, shouldRetry:false);
+                    return;
+                }
             }
             else throw new NotSupportedException($"Unsupported Job Request Type: '{job.RequestType}'");
 
@@ -366,9 +426,9 @@ public class BackgroundJobs : IBackgroundJobs
                 var reqCtx = new BasicRequest(response);
                 reqCtx.SetBackgroundJob(job);
                 if (command is IRequiresRequest requiresRequest)
-                {
                     requiresRequest.Request = reqCtx;
-                }
+                if (command is IRequiresCancellationToken hasToken)
+                    hasToken.Token = ct;
 
                 CommandResult? commandResult = null;
                 var i = 0;
@@ -416,27 +476,30 @@ public class BackgroundJobs : IBackgroundJobs
             job.ResponseBody = ClientConfig.ToJson(response);
         }
 
-        lock (dbWrites)
+        if (!job.Transient)
         {
-            using var trans = db.OpenTransaction();
-            db.UpdateOnly(() => new BackgroundJob {
-                Progress = job.Progress,
-                CompletedDate = job.CompletedDate,
-                DurationMs = job.DurationMs,
-                State = job.State,
-                Response = job.Response,
-                ResponseBody = job.ResponseBody,
-                LastActivityDate = job.LastActivityDate,
-            }, where: x => x.Id == job.Id);
+            lock (dbWrites)
+            {
+                using var trans = db.OpenTransaction();
+                db.UpdateOnly(() => new BackgroundJob {
+                    Progress = job.Progress,
+                    CompletedDate = job.CompletedDate,
+                    DurationMs = job.DurationMs,
+                    State = job.State,
+                    Response = job.Response,
+                    ResponseBody = job.ResponseBody,
+                    LastActivityDate = job.LastActivityDate,
+                }, where: x => x.Id == job.Id);
 
-            db.UpdateOnly(() => new JobSummary {
-                CompletedDate = job.CompletedDate,
-                DurationMs = job.DurationMs,
-                State = job.State,                
-                Response = job.Response,
-                Attempts = job.Attempts,
-            }, where: x => x.Id == job.Id);
-            trans.Commit();
+                db.UpdateOnly(() => new JobSummary {
+                    CompletedDate = job.CompletedDate,
+                    DurationMs = job.DurationMs,
+                    State = job.State,                
+                    Response = job.Response,
+                    Attempts = job.Attempts,
+                }, where: x => x.Id == job.Id);
+                trans.Commit();
+            }
         }
 
         if (job.Callback != null)
@@ -570,6 +633,7 @@ public class BackgroundJobs : IBackgroundJobs
         ct = stoppingToken;
         log.LogInformation("JOBS Starting...");
         await LoadJobQueueAsync();
+        await LoadScheduledTasksAsync();
     }
 
     /// <summary>
@@ -579,20 +643,37 @@ public class BackgroundJobs : IBackgroundJobs
     {
         using var db = feature.OpenJobsDb();
         var requestId = Guid.NewGuid().ToString("N");
+        var now = DateTime.UtcNow;
 
+        var completedJobs = await db.SelectAsync<BackgroundJob>(x => x.CompletedDate != null, token: ct);
+        if (completedJobs.Count > 0)
+        {
+            foreach (var completedJob in completedJobs)
+            {
+                try
+                {
+                    var response = CreateResponse(completedJob);
+                    await CompleteJobAsync(completedJob, response);
+                }
+                catch (Exception e)
+                {
+                    log.LogError("Failed to complete job on Startup: {Id}", completedJob.Id);
+                    await FailJobAsync(completedJob, e, shouldRetry: false);
+                }
+            }
+        }
+        
         lock (dbWrites)
         {
             db.UpdateOnly(() => new BackgroundJob {
                 RequestId = requestId,
                 StartedDate = null,
                 State = BackgroundJobState.Queued,
-            }, where:x => x.CompletedDate == null 
-                          && x.DependsOn == null && (x.RunAfter == null || DateTime.UtcNow > x.RunAfter));
+                LastActivityDate = DateTime.UtcNow,
+            }, where:x => x.DependsOn == null && (x.RunAfter == null || now > x.RunAfter));
         }
 
         var dispatchJobs = await db.SelectAsync<BackgroundJob>(x => x.RequestId == requestId, token: ct);
-        var notifyJobs = await db.SelectAsync<BackgroundJob>(x => x.CompletedDate != null, token: ct);
-
         if (dispatchJobs.Count > 0)
         {
             log.LogInformation("JOBS Queued {Count} Incomplete Jobs", dispatchJobs.Count);
@@ -601,27 +682,21 @@ public class BackgroundJobs : IBackgroundJobs
                 DispatchToWorker(job);
             }
         }
-        if (notifyJobs.Count > 0)
-        {
-            log.LogInformation("JOBS Notifying {Count} Jobs", notifyJobs.Count);
-            _ = Task.Factory.StartNew(async () => {
-                foreach (var job in notifyJobs)
-                {
-                    await NotifyCompletionAsync(job);
-                }
-            }, ct);
-        }
+
+        // Execute any queued dependent jobs
+        await DispatchPendingJobsAsync();
     }
 
-    public void DispatchPendingJobs()
+    public async Task DispatchPendingJobsAsync()
     {
         using var db = feature.OpenJobsDb();
         var expiredJobIds = new List<long>();
         var dependentJobIds = new List<long>();
         var scheduledJobIds = new List<long>();
-        var pendingJobs = db.Select(db.From<BackgroundJob>()
-            .Where(x => x.CompletedDate == null));
+        var pendingJobs = await db.SelectAsync(db.From<BackgroundJob>()
+            .Where(x => x.CompletedDate == null), token: ct);
 
+        var now = DateTime.UtcNow;
         var completedJobsMap = new Dictionary<long, CompletedJob>();
         if (pendingJobs.Count >= 0)
         {
@@ -636,11 +711,11 @@ public class BackgroundJobs : IBackgroundJobs
                 }
                 if (job.RequestId != null)
                     continue;
-                if (job.RunAfter == null || DateTime.UtcNow > job.RunAfter)
+                if (job.RunAfter == null || now > job.RunAfter)
                 {
                     if (job.DependsOn != null)
                     {
-                        var dependsOnSummary = GetJob(job.DependsOn.Value);
+                        var dependsOnSummary = await GetJobAsync(job.DependsOn.Value);
                         if (dependsOnSummary?.Completed != null)
                         {
                             completedJobsMap[job.DependsOn.Value] = job.ParentJob = dependsOnSummary.Completed;
@@ -670,6 +745,7 @@ public class BackgroundJobs : IBackgroundJobs
             {
                 requeudJobsCount += db.UpdateOnly(() => new BackgroundJob {
                     RequestId = requestId,
+                    LastActivityDate = now,
                 }, where:x => expiredJobIds.Contains(x.Id));
             }
 
@@ -678,13 +754,14 @@ public class BackgroundJobs : IBackgroundJobs
             {
                 requeudJobsCount += db.UpdateOnly(() => new BackgroundJob {
                     RequestId = requestId,
+                    LastActivityDate = now,
                 }, where:x => allIds.Contains(x.Id) && x.RequestId == null);
             }
         }
         
         if (requeudJobsCount > 0)
         {
-            var requeudJobs = db.Select<BackgroundJob>(x => x.RequestId == requestId);
+            var requeudJobs = await db.SelectAsync<BackgroundJob>(x => x.RequestId == requestId, token: ct);
             if (requeudJobs.Count > 0)
             {
                 log.LogInformation("JOBS Queueing {Count} Jobs ({ScheduledCount} Scheduled, {DependentCount} Dependent, {TimedOutCount} Expired)",
@@ -703,7 +780,7 @@ public class BackgroundJobs : IBackgroundJobs
         }
     }
 
-    public static ConcurrentQueue<BackgroundJobStatusUpdate> updates = new();
+    static ConcurrentQueue<BackgroundJobStatusUpdate> updates = new();
     public void UpdateJobStatus(BackgroundJobStatusUpdate status)
     {
         updates.Enqueue(status);
@@ -774,23 +851,20 @@ public class BackgroundJobs : IBackgroundJobs
 
     private long ticks = 0;
 
-    public Task TickAsync()
+    public async Task TickAsync()
     {
         Interlocked.Increment(ref ticks);
         if (log.IsEnabled(LogLevel.Debug))
             log.LogDebug("JOBS Tick {Ticks}", ticks);
 
-        DispatchPendingJobs();
+        await DispatchPendingJobsAsync();
         PerformDbUpdates();
-        return Task.CompletedTask;
+        ExecuteDueScheduledTasks();
     }
 
     private CommandInfo AssertCommand(string? command)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var commandInfo = feature.CommandsFeature.CommandInfos.FirstOrDefault(x => x.Name == command);
-        if (commandInfo == null) 
-            throw new InvalidOperationException($"Command '{command}' not found.");
-        return commandInfo;
+        return feature.CommandsFeature.AssertCommandInfo(command);
     }
 }
