@@ -11,6 +11,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -217,6 +218,11 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
         }
     }
 
+    public async Task ExecuteCommandAsync<TCommand>(TCommand command) 
+        where TCommand : IAsyncCommand<NoArgs> 
+    {
+        await ExecuteCommandAsync(command.GetType(), dto => command.ExecuteAsync((NoArgs)dto), NoArgs.Value).ConfigAwait();
+    }
     public async Task ExecuteCommandAsync<TCommand, TRequest>(TCommand command, TRequest request) 
         where TCommand : IAsyncCommand<TRequest> 
     {
@@ -247,7 +253,7 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
         return null;
     }
 
-    public async Task<CommandResult> ExecuteCommandAsync(Type commandType, Func<object,Task> execFn, object requestDto)
+    public async Task<CommandResult> ExecuteCommandAsync(Type commandType, Func<object,Task> execFn, object requestDto, CancellationToken token=default)
     {
         var result = new CommandResult { Type = CommandResult.Command, Name = commandType.Name, At = DateTime.UtcNow };
         RetryPolicy? retryPolicy = null;
@@ -256,13 +262,15 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
         
         while (true)
         {
+            token.ThrowIfCancellationRequested();
             try
             {
                 if (ValidationFeature != null)
                 {
-                    await ValidationFeature.ValidateRequestAsync(requestDto, new BasicHttpRequest());
+                    var reqCtx = new BasicHttpRequest();
+                    await ValidationFeature.ValidateRequestAsync(requestDto, reqCtx, token);
                 }
-        
+
                 await execFn(requestDto);
                 Log!.LogDebug("{Command} took {ElapsedMilliseconds}ms to execute", commandType.Name, sw.ElapsedMilliseconds);
 
@@ -309,7 +317,8 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
                 var delayMs = ExecUtils.CalculateRetryDelayMs(attempt, retry);
                 if (delayMs > 0)
                 {
-                    await Task.Delay(delayMs);
+                    token.ThrowIfCancellationRequested();
+                    await Task.Delay(delayMs, token);
                 }
             }
         }
@@ -331,7 +340,7 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
         }
     }
 
-    public async Task<CommandResult> ExecuteCommandAsync(object oCommand, object commandRequest)
+    public async Task<CommandResult> ExecuteCommandAsync(object oCommand, object commandRequest, CancellationToken token=default)
     {
         var commandType = oCommand.GetType();
         var method = commandType.GetMethod("ExecuteAsync")
@@ -339,11 +348,20 @@ public class CommandsFeature : IPlugin, IConfigureServices, IHasStringId, IPreIn
                 
         async Task Exec(object commandArg)
         {
+            if (oCommand is IRequiresRequest hasRequest)
+            {
+                hasRequest.Request ??= new BasicHttpRequest(commandArg)
+                {
+                    Items = {
+                        [nameof(CancellationToken)] = token,
+                    }
+                };
+            }
             var methodInvoker = GetInvoker(method);
             await methodInvoker(oCommand, commandArg);
         }
 
-        return await ExecuteCommandAsync(commandType, Exec, commandRequest);
+        return await ExecuteCommandAsync(commandType, Exec, commandRequest, token);
     }
 
     public ConcurrentQueue<CommandResult> CommandResults { get; set; } = [];

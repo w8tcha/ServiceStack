@@ -17,9 +17,9 @@ public interface IHasResult<out T>
     T Result { get; }
 }
 
-public interface IRequiresCancellationToken
+public interface IHasCancellationToken
 {
-    public CancellationToken Token { get; set; }
+    public CancellationToken Token { get; }
 }
 public interface IAsyncCommand<in TRequest, out TResult> : IAsyncCommand<TRequest>, IHasResult<TResult> { }
 
@@ -31,20 +31,22 @@ public class NoArgs
 
 public abstract class AsyncCommand : AsyncCommand<NoArgs>
 {
-    protected override Task RunAsync(NoArgs request) => RunAsync();
-    protected abstract Task RunAsync();
+    protected override Task RunAsync(NoArgs request, CancellationToken token) => RunAsync(token);
+    protected abstract Task RunAsync(CancellationToken token);
 }
 public abstract class SyncCommand : SyncCommand<NoArgs>
 {
     protected override void Run(NoArgs request) => Run();
     protected abstract void Run();
 }
-public abstract class AsyncCommand<TArgs> : IAsyncCommand<TArgs>, IRequiresRequest, IRequiresCancellationToken
+public abstract class AsyncCommand<TArgs> : IAsyncCommand<TArgs>, IRequiresRequest, IHasCancellationToken
 {
-    public CancellationToken Token { get; set; } = default;
+    public CancellationToken Token => Request?.Items.TryGetValue(nameof(CancellationToken), out var oToken) == true
+        ? (CancellationToken)oToken
+        : default;
     public IRequest Request { get; set; }
-    public Task ExecuteAsync(TArgs request) => RunAsync(request);
-    protected abstract Task RunAsync(TArgs request);
+    public async Task ExecuteAsync(TArgs request) => await RunAsync(request,Token).ConfigureAwait(false);
+    protected abstract Task RunAsync(TArgs request, CancellationToken token);
 }
 public abstract class SyncCommand<TArgs> : IAsyncCommand<TArgs>, IRequiresRequest
 {
@@ -56,13 +58,15 @@ public abstract class SyncCommand<TArgs> : IAsyncCommand<TArgs>, IRequiresReques
     }
     protected abstract void Run(TArgs request);
 }
-public abstract class AsyncCommandWithResult<TResult> : IAsyncCommand<NoArgs, TResult>, IRequiresRequest, IRequiresCancellationToken
+public abstract class AsyncCommandWithResult<TResult> : IAsyncCommand<NoArgs, TResult>, IRequiresRequest, IHasCancellationToken
 {
-    public CancellationToken Token { get; set; } = default;
+    public CancellationToken Token => Request?.Items.TryGetValue(nameof(CancellationToken), out var oToken) == true
+        ? (CancellationToken)oToken
+        : default;
     public IRequest Request { get; set; }
     public TResult Result { get; protected set; }
-    public async Task ExecuteAsync(NoArgs request) => Result = await RunAsync().ConfigureAwait(false);
-    protected abstract Task<TResult> RunAsync();
+    public async Task ExecuteAsync(NoArgs request) => Result = await RunAsync(Token).ConfigureAwait(false);
+    protected abstract Task<TResult> RunAsync(CancellationToken token);
 }
 public abstract class SyncCommandWithResult<TResult> : IAsyncCommand<NoArgs, TResult>, IRequiresRequest
 {
@@ -75,15 +79,15 @@ public abstract class SyncCommandWithResult<TResult> : IAsyncCommand<NoArgs, TRe
     }
     protected abstract TResult Run();
 }
-public abstract class AsyncCommandWithResult<TArgs,TResult> : IAsyncCommand<TArgs, TResult>, IRequiresRequest, IRequiresCancellationToken
+public abstract class AsyncCommandWithResult<TArgs,TResult> : IAsyncCommand<TArgs, TResult>, IRequiresRequest, IHasCancellationToken
 {
-    public CancellationToken Token { get; set; } = default;
+    public CancellationToken Token => Request?.Items.TryGetValue(nameof(CancellationToken), out var oToken) == true
+        ? (CancellationToken)oToken
+        : default;
     public IRequest Request { get; set; }
     public TResult Result { get; protected set; }
-
-    public async Task ExecuteAsync(TArgs request) => Result = await RunAsync(request).ConfigureAwait(false);
-
-    protected abstract Task<TResult> RunAsync(TArgs request);
+    public async Task ExecuteAsync(TArgs request) => Result = await RunAsync(request,Token).ConfigureAwait(false);
+    protected abstract Task<TResult> RunAsync(TArgs request, CancellationToken token);
 }
 public abstract class SyncCommandWithResult<TArgs,TResult> : IAsyncCommand<TArgs, TResult>, IRequiresRequest
 {

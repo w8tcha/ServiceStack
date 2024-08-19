@@ -4,6 +4,7 @@ using System;
 using System.Data;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace ServiceStack.Jobs;
@@ -13,6 +14,7 @@ public interface IBackgroundJobs
     BackgroundJobRef EnqueueApi(object requestDto, BackgroundJobOptions? options = null);
     BackgroundJobRef EnqueueCommand(string commandName, object arg, BackgroundJobOptions? options = null);
     BackgroundJob RunCommand(string commandName, object arg, BackgroundJobOptions? options = null);
+    Task<object?> RunCommandAsync(string commandName, object arg, BackgroundJobOptions? options = null);
     Task ExecuteJobAsync(BackgroundJob job);
     Task CancelJobAsync(BackgroundJob job);
     Task FailJobAsync(BackgroundJob job, Exception ex);
@@ -26,7 +28,7 @@ public interface IBackgroundJobs
     IDbConnection OpenJobsDb();
     IDbConnection OpenJobsMonthDb(DateTime createdDate);
     JobResult? GetJob(long jobId);
-    Task<JobResult?> GetJobAsync(long jobId);
+    Task<JobResult?> GetJobAsync(long jobId, CancellationToken token=default);
     object CreateRequest(BackgroundJobBase job);
     object? CreateResponse(BackgroundJobBase job);
 
@@ -115,6 +117,8 @@ public class BackgroundJobOptions
     public Action<object?>? OnSuccess { get; set; }
     [IgnoreDataMember]
     public Action<Exception>? OnFailed { get; set; }
+    [IgnoreDataMember]
+    public CancellationToken? Token { get; set; } 
 }
 
 public class WorkerStats
@@ -125,14 +129,4 @@ public class WorkerStats
     public long Completed { get; set; }
     public long Retries { get; set; }
     public long Failed { get; set; }
-}
-
-/// <summary>
-/// Execute AutoQuery Create/Update/Delete Request DTO in a background thread
-/// </summary>
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
-public class WorkerAttribute : AttributeBase
-{
-    public string Name { get; set; }
-    public WorkerAttribute(string name) => Name = name;
 }
