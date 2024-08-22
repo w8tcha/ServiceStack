@@ -1,8 +1,10 @@
+#if NET8_0_OR_GREATER
 #nullable enable
 
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using ServiceStack.Web;
 
 namespace ServiceStack.Jobs;
@@ -86,6 +88,7 @@ public static class JobUtils
             ParentId = options?.ParentId,
             Worker = options?.Worker,
             Tag = options?.Tag,
+            BatchId = options?.BatchId,
             Callback = options?.Callback,
             RunAfter = options?.RunAfter,
             DependsOn = options?.DependsOn,
@@ -113,6 +116,7 @@ public static class JobUtils
         to.RefId = from.RefId;
         to.Worker = from.Worker;
         to.Tag = from.Tag;
+        to.BatchId = from.BatchId;
         to.Callback = from.Callback;
         to.RunAfter = from.RunAfter;
         to.CreatedDate = from.CreatedDate;
@@ -153,6 +157,7 @@ public static class JobUtils
             RefId = from.RefId,
             Worker = from.Worker,
             Tag = from.Tag,
+            BatchId = from.BatchId,
             CreatedDate = from.CreatedDate,
             CreatedBy = from.CreatedBy,
             RequestType = from.RequestType,
@@ -189,14 +194,6 @@ public static class JobUtils
             : null;
     }
 
-    public static void UpdateBackgroundJobStatus(this IBackgroundJobs jobs, IRequest? req, double? progress=null, string? status=null, string? log=null)
-        => jobs.UpdateJobStatus(new(GetBackgroundJob(req), 
-            progress: progress, status: status, log: log));
-    public static void UpdateBackgroundJobStatus(this IBackgroundJobs jobs, BackgroundJob job, double? progress=null, string? status=null, string? log=null)
-    {
-        jobs.UpdateJobStatus(new(job, progress:progress, status:status, log:log));
-    }
-
     public static object? CreateRequest(this IBackgroundJobs jobs, JobResult? result)
     {
         var job = result?.Job;
@@ -207,4 +204,7 @@ public static class JobUtils
         var job = result?.Job;
         return job != null ? jobs.CreateResponse(job) : null;
     }
+    public static JobLogger CreateJobLogger(this IRequest req, IBackgroundJobs jobs, ILogger log=null) =>
+        new(jobs, req.GetBackgroundJob(), log);
 }
+#endif

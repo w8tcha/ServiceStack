@@ -58,7 +58,8 @@ public static class IdentityAuth
         {
             services.AddSingleton<IIdentityAuthContextManager>(Manager);
             services.AddSingleton<IIdentityAuthContext>(ctx);
-            
+            services.AddSingleton<IUserResolver,IdentityAuthUserResolver>();
+
             var authProviders = new List<IAuthProvider>();
             if (ctx.EnableApplicationAuth)
             {

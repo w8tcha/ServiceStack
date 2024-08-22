@@ -16,24 +16,25 @@ public interface IBackgroundJobs
     BackgroundJob RunCommand(string commandName, object arg, BackgroundJobOptions? options = null);
     Task<object?> RunCommandAsync(string commandName, object arg, BackgroundJobOptions? options = null);
     Task ExecuteJobAsync(BackgroundJob job);
-    Task CancelJobAsync(BackgroundJob job);
-    Task FailJobAsync(BackgroundJob job, Exception ex);
-    Task FailJobAsync(BackgroundJob job, ResponseStatus error, bool shouldRetry);
-    Task CompleteJobAsync(BackgroundJob job, object? response=null);
+    void CancelJob(BackgroundJob job);
+    void FailJob(BackgroundJob job, Exception ex);
+    void FailJob(BackgroundJob job, ResponseStatus error, bool shouldRetry);
+    void CompleteJob(BackgroundJob job, object? response = null);
     void UpdateJobStatus(BackgroundJobStatusUpdate status);
-    Task StartAsync(System.Threading.CancellationToken stoppingToken);
+    Task StartAsync(CancellationToken stoppingToken);
     Task TickAsync();
     Dictionary<string, int> GetWorkerQueueCounts();
     List<WorkerStats> GetWorkerStats();
     IDbConnection OpenJobsDb();
     IDbConnection OpenJobsMonthDb(DateTime createdDate);
     JobResult? GetJob(long jobId);
-    Task<JobResult?> GetJobAsync(long jobId, CancellationToken token=default);
+    JobResult? GetJobByRefId(string refId);
     object CreateRequest(BackgroundJobBase job);
     object? CreateResponse(BackgroundJobBase job);
 
     void RecurringApi(string taskName, Schedule schedule, object requestDto, BackgroundJobOptions? options = null);
     void RecurringCommand(string taskName, Schedule schedule, string commandName, object arg, BackgroundJobOptions? options = null);
+    void DeleteRecurringTask(string taskName);
 }
 
 public class BackgroundJobRef(long id, string refId)
@@ -47,7 +48,7 @@ public class BackgroundJobRef(long id, string refId)
     }
 }
 
-public class BackgroundJobStatusUpdate(BackgroundJob job, double? progress=null, string? status=null, string? log=null)
+public struct BackgroundJobStatusUpdate(BackgroundJob job, double? progress=null, string? status=null, string? log=null)
 {
     public BackgroundJob Job { get; } = job;
     public double? Progress { get; } = progress;
@@ -105,6 +106,7 @@ public class BackgroundJobOptions
     /// Associate Job with a tag group
     /// </summary>
     public string? Tag { get; set; }
+    public virtual string? BatchId { get; set; }
     public string? CreatedBy { get; set; }
     public int? TimeoutSecs { get; set; }
     public Dictionary<string, string>? Args { get; set; } //= Provider

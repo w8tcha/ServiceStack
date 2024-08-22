@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using System.Data;
+using ServiceStack.Auth;
 using ServiceStack.Data;
 using ServiceStack.OrmLite;
 
