@@ -20,6 +20,14 @@ public partial class BackgroundJobs : IBackgroundJobs
     readonly BackgroundsJobFeature feature;
     private IServiceProvider services;
     readonly IServiceScopeFactory scopeFactory;
+    private ConcurrentDictionary<string, int> lastCommandDurations = new();
+    private ConcurrentDictionary<string, int> lastApiDurations = new();
+    ConcurrentDictionary<string, BackgroundJobsWorker> workers = new();
+    static ConcurrentQueue<BackgroundJobStatusUpdate> updates = new();
+    string Table;
+    Columns columns;
+    private long ticks = 0;
+
     
     public BackgroundJobs(ILogger<BackgroundJobs> log, 
         BackgroundsJobFeature feature, IDbConnectionFactory dbFactory, IServiceProvider services, IServiceScopeFactory scopeFactory)
@@ -216,6 +224,16 @@ public partial class BackgroundJobs : IBackgroundJobs
         return response;
     }
 
+    public int? GetCommandEstimatedDurationMs(string commandType) =>
+        lastCommandDurations.TryGetValue(commandType, out var lastDuration) 
+            ? lastDuration 
+            : null;
+    
+    public int? GetApiEstimatedDurationMs(string requestType) =>
+        lastApiDurations.TryGetValue(requestType, out var lastDuration) 
+            ? lastDuration 
+            : null;
+
     object DeserializeFromJson(string json, Type type)
     {
         try
@@ -257,14 +275,22 @@ public partial class BackgroundJobs : IBackgroundJobs
         return reqCtx;
     }
 
+    private readonly ConcurrentDictionary<long, CancellationTokenSource> cancellationSources = new();
+    private readonly ConcurrentDictionary<long, DateTime> cancelJobIds = new();
+    
     // Executed on BackgroundJobsWorker Thread
     public async Task ExecuteJobAsync(BackgroundJob job)
     {
+        if (cancelJobIds.TryRemove(job.Id, out _))
+        {
+            FailJob(job, new TaskCanceledException("Job was cancelled"));
+        }
+        
         using var linkedCts = job.Token != null
             ? CancellationTokenSource.CreateLinkedTokenSource(ct, job.Token.Value)
             : CancellationTokenSource.CreateLinkedTokenSource(ct);
         linkedCts.CancelAfter(TimeSpan.FromSeconds(job.TimeoutSecs ?? feature.DefaultTimeoutSecs));
-
+        cancellationSources[job.Id] = linkedCts;
         try
         {
             using var scope = scopeFactory.CreateScope();
@@ -333,7 +359,8 @@ public partial class BackgroundJobs : IBackgroundJobs
                 if (response is IHttpError httpError)
                 {
                     var errorStatus = httpError.Response.GetResponseStatus()
-                        ?? ResponseStatusUtils.CreateResponseStatus(httpError.ErrorCode, httpError.Message, null);
+                                      ?? ResponseStatusUtils.CreateResponseStatus(httpError.ErrorCode,
+                                          httpError.Message, null);
                     FailJob(job, errorStatus, shouldRetry: false);
                     return;
                 }
@@ -354,11 +381,39 @@ public partial class BackgroundJobs : IBackgroundJobs
         {
             FailJob(job, ex);
         }
+        finally
+        {
+            cancellationSources.Remove(job.Id, out _);
+            cancelJobIds.Remove(job.Id, out _);
+        }
     }
 
-    public void CancelJob(BackgroundJob job)
+    public void CancelJob(long jobId)
     {
-        FailJob(job, new TaskCanceledException("Job was cancelled"), shouldRetry:false);
+        if (cancellationSources.TryGetValue(jobId, out var cts))
+        {
+            cts.Cancel();
+        }
+        else
+        {
+            using var db = OpenJobsDb();
+            var error = new TaskCanceledException("Job was cancelled").ToResponseStatus();
+            var updatedQueuedJob = db.UpdateOnly(() => new BackgroundJob {
+                State = BackgroundJobState.Cancelled,
+                Error = error,
+                ErrorCode = error.ErrorCode,
+                LastActivityDate = DateTime.UtcNow,
+            }, where: x => x.Id == jobId);
+            if (updatedQueuedJob > 0)
+            {
+                cancelJobIds[jobId] = DateTime.UtcNow;
+                db.UpdateOnly(() => new JobSummary {
+                    State = BackgroundJobState.Cancelled,
+                    ErrorCode = error.ErrorCode,
+                    ErrorMessage = error.Message,
+                }, where: x => x.Id == jobId);
+            }
+        }
     }
 
     public void FailJob(BackgroundJob job, Exception ex)
@@ -579,6 +634,11 @@ public partial class BackgroundJobs : IBackgroundJobs
             }
         }
 
+        if (job is { RequestType: CommandResult.Command, Command: not null, DurationMs: > 0 })
+            lastCommandDurations[job.Command] = job.DurationMs;
+        else if (job is { RequestType: CommandResult.Api, DurationMs: > 0 })
+            lastApiDurations[job.Request] = job.DurationMs;
+
         if (job.Callback != null)
         {
             _ = Task.Factory.StartNew(() => NotifyCompletionAsync(job, response), ct);
@@ -704,7 +764,6 @@ public partial class BackgroundJobs : IBackgroundJobs
         return to;
     }
 
-    ConcurrentDictionary<string, BackgroundJobsWorker> workers = new();
     public void DispatchToWorker(BackgroundJob job)
     {
         // If job.Thread is specified, use a dedicated worker for that thread
@@ -756,6 +815,30 @@ public partial class BackgroundJobs : IBackgroundJobs
         using var db = feature.OpenJobsDb();
         var requestId = Guid.NewGuid().ToString("N");
         var now = DateTime.UtcNow;
+
+        var commandDurations = db.Dictionary<string, int>(
+            db.From<JobSummary>()
+                .Where(j => Sql.In(j.Id,
+                    db.From<JobSummary>()
+                        .Where(x => x.State == BackgroundJobState.Completed
+                                    && x.DurationMs > 0
+                                    && x.RequestType == CommandResult.Command)
+                        .GroupBy(x => x.Command)
+                        .Select(x => x.Id)))
+                .Select(x => new { x.Command, x.DurationMs }));
+        lastCommandDurations = new(commandDurations);
+        
+        var apiDurations = db.Dictionary<string, int>(
+            db.From<JobSummary>()
+                .Where(j => Sql.In(j.Id,
+                    db.From<JobSummary>()
+                        .Where(x => x.State == BackgroundJobState.Completed
+                                    && x.DurationMs > 0
+                                    && x.RequestType == CommandResult.Api)
+                        .GroupBy(x => x.Command)
+                        .Select(x => x.Id)))
+                .Select(x => new { x.Request, x.DurationMs }));
+        lastApiDurations = new(apiDurations);
 
         var completedJobs = db.Select<BackgroundJob>(x => x.CompletedDate != null);
         if (completedJobs.Count > 0)
@@ -892,14 +975,11 @@ public partial class BackgroundJobs : IBackgroundJobs
         }
     }
 
-    static ConcurrentQueue<BackgroundJobStatusUpdate> updates = new();
     public void UpdateJobStatus(BackgroundJobStatusUpdate status)
     {
         updates.Enqueue(status);
     }
 
-    string Table;
-    Columns columns;
     record class Columns(string Logs, string Status, string Progress, string Id);
 
     private void PerformDbUpdates()
@@ -953,9 +1033,7 @@ public partial class BackgroundJobs : IBackgroundJobs
         }
     }
 
-    private long ticks = 0;
-
-    public async Task TickAsync()
+    public Task TickAsync()
     {
         Interlocked.Increment(ref ticks);
         if (log.IsEnabled(LogLevel.Debug))
@@ -964,11 +1042,19 @@ public partial class BackgroundJobs : IBackgroundJobs
         DispatchPendingJobs();
         PerformDbUpdates();
         ExecuteDueScheduledTasks();
+        return Task.CompletedTask;
     }
 
     private CommandInfo AssertCommand(string? command)
     {
         ArgumentNullException.ThrowIfNull(command);
         return feature.CommandsFeature.AssertCommandInfo(command);
+    }
+
+    public void Clear()
+    {
+        workers.Clear();
+        updates.Clear();
+        ClearScheduledTasks();
     }
 }

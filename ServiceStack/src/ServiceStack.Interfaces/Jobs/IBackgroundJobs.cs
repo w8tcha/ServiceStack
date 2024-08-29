@@ -16,7 +16,7 @@ public interface IBackgroundJobs
     BackgroundJob RunCommand(string commandName, object arg, BackgroundJobOptions? options = null);
     Task<object?> RunCommandAsync(string commandName, object arg, BackgroundJobOptions? options = null);
     Task ExecuteJobAsync(BackgroundJob job);
-    void CancelJob(BackgroundJob job);
+    void CancelJob(long jobId);
     void CancelWorker(string worker);
     void FailJob(BackgroundJob job, Exception ex);
     void FailJob(BackgroundJob job, ResponseStatus error, bool shouldRetry);
@@ -36,6 +36,8 @@ public interface IBackgroundJobs
     void RecurringApi(string taskName, Schedule schedule, object requestDto, BackgroundJobOptions? options = null);
     void RecurringCommand(string taskName, Schedule schedule, string commandName, object arg, BackgroundJobOptions? options = null);
     void DeleteRecurringTask(string taskName);
+    int? GetCommandEstimatedDurationMs(string commandType);
+    int? GetApiEstimatedDurationMs(string requestType);
 }
 
 public class BackgroundJobRef(long id, string refId)
