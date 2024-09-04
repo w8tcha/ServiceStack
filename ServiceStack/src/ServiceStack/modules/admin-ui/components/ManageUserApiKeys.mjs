@@ -6,7 +6,7 @@ function arraysAreEqual(a, b) {
     if (!a || !b) return false
     return a.length === b.length && a.every((v, i) => v === b[i])
 }
-const CreateApiKeyForm = {
+ export const CreateApiKeyForm = {
     template:`
       <div>
         <ModalDialog v-if="apiKey" size-class="w-96" @done="done">
@@ -143,7 +143,7 @@ const CreateApiKeyForm = {
             submit, done }
     }
 }
-const EditApiKeyForm = {
+export const EditApiKeyForm = {
     template:`
         <div>
           <form @submit="submit" :class="css.card.panelClass">
@@ -310,7 +310,7 @@ const EditApiKeyForm = {
             submit, submitDelete, submitDisable, submitEnable }
     }
 }
-const ManageUserApiKeys = {
+export const ManageUserApiKeys = {
     components: {
         CreateApiKeyForm,
         EditApiKeyForm,
@@ -324,7 +324,7 @@ const ManageUserApiKeys = {
             Create API Key
           </SecondaryButton>
           <CreateApiKeyForm v-if="show==='CreateApiKeyForm'" :userId="id" :userName="userName" @done="done" class="mt-2" :key="renderKey" />
-          <EditApiKeyForm v-else-if="selected" :id="selected" @done="done" class="mt-2" :key="renderKey" />
+          <EditApiKeyForm v-else-if="selected" :id="selected" @done="done" class="mt-2" :key="renderKey+1000" />
         </div>
         <div class="w-full overflow-auto px-1 -ml-1">
             <DataGrid v-if="api.response?.results?.length" :items="api.response.results"
@@ -415,6 +415,6 @@ const ManageUserApiKeys = {
         return { css, renderKey, id, userName, columns, show, api, toggleDialog, done, formatDate, relativeTime, selected, rowSelected }
     }
 }
-function install(app) {
+export function install(app) {
     app.components({ CreateApiKeyForm, EditApiKeyForm })
 }

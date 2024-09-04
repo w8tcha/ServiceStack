@@ -11,6 +11,9 @@ Directives={}
 Props={}
 OnStart=[]
 Components={}
+provide(name,provider){if(provider)
+this.Providers[name]=provider
+return this.Providers[name]}
 provides(providers){Object.keys(providers).forEach(k=>this.Providers[k]=providers[k])}
 components(components){Object.keys(components).forEach(k=>this.Components[k]=components[k])}
 component(name,c){if(c){this.Components[name]=c}
@@ -37,9 +40,9 @@ function state(store){return each(allKeys,(o,key)=>store[key]?o[key]=store[key]:
 let publish=(name,args)=>{events.publish('route:'+name,args)
 events.publish('route:nav',args)}
 let events=app.events
-let store={page,queryKeys,...each(allKeys,(o,x)=>o[x]=''),start(){window.addEventListener('popstate',(event)=>{this.set({[page]:getPage(),...event.state})
+let store={page,queryKeys,...each(allKeys,(o,x)=>o[x]=''),start(){window.addEventListener('popstate',(event)=>{this.set({[page]:getPage(),...event.state,$clear:true})
 publish('init',state(this))})
-console.log('routes.start()',page,getPage())
+console.debug('routes.start()',page,getPage())
 this.set({[page]:getPage(),...(location.search?queryString(location.search):{})})
 publish('init',state(this))},set(args){if(typeof args['$page']!='undefined'){this[page]=args[page]=args['$page']}
 if(args['$clear']){allKeys.forEach(k=>this[k]=args[k]!=null?args[k]:'')}else{Object.keys(args).forEach(k=>{if(allKeys.indexOf(k)>=0){this[k]=args[k]}})}},get state(){return state(this)},to(args){this.set(args)
@@ -105,7 +108,7 @@ let sort1=group?group+map(SORT_METHODS.indexOf(op.method||'ANY'),x=>x===-1?'':x.
 return sort1+`_`+op.request.name}
 export function sortOps(ops){ops.sort((a,b)=>opSortName(a).localeCompare(opSortName(b)))
 return ops}
-let defaultIcon=globalThis.Server.ui.theme.modelIcon||{svg:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12v6s0 3 7 3s7-3 7-3v-6"/><path d="M5 6v6s0 3 7 3s7-3 7-3V6"/><path d="M12 3c7 0 7 3 7 3s0 3-7 3s-7-3-7-3s0-3 7-3Z"/></g></svg>`}
+let defaultIcon=globalThis.Server?.ui.theme.modelIcon||{svg:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12v6s0 3 7 3s7-3 7-3v-6"/><path d="M5 6v6s0 3 7 3s7-3 7-3V6"/><path d="M12 3c7 0 7 3 7 3s0 3-7 3s-7-3-7-3s0-3 7-3Z"/></g></svg>`}
 export function getIcon({op,type}){if(op){let img=op.request.icon||typeOfRef(op.viewModel)?.icon||typeOfRef(op.dataModel)?.icon
 if(img)
 return img}

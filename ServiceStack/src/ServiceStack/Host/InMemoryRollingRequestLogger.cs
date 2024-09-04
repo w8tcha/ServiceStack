@@ -27,8 +27,6 @@ public class InMemoryRollingRequestLogger : IRequestLogger
 
     public bool LimitToServiceRequests { get; set; }
 
-    public string[] RequiredRoles { get; set; }
-
     public Func<IRequest, bool> SkipLogging { get; set; }
         
     public Type[] ExcludeRequestDtoTypes { get; set; }
@@ -90,7 +88,7 @@ public class InMemoryRollingRequestLogger : IRequestLogger
                     var val = entry.ExceptionData[key];
                     if (val != null && IgnoreFilter(val))
                     {
-                        keysToRemove ??= new List<object>();
+                        keysToRemove ??= [];
                         keysToRemove.Add(key);
                     }
                 }

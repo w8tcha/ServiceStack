@@ -354,11 +354,11 @@ public class BackgroundJobsTests
         JobScopedServices.LastResult = null;
         JobScopedServices.Requests.Clear();
 
-        using var db = feature.OpenJobsDb();
+        using var db = feature.OpenDb();
         db.DeleteAllAsync<BackgroundJob>();
         db.DeleteAllAsync<JobSummary>();
         db.DeleteAllAsync<ScheduledTask>();
-        using var monthDb = feature.OpenJobsMonthDb(DateTime.UtcNow);
+        using var monthDb = feature.OpenMonthDb(DateTime.UtcNow);
         monthDb.DeleteAllAsync<CompletedJob>();
         monthDb.DeleteAllAsync<FailedJob>();
         ((BackgroundJobs)feature.Jobs).Clear();
@@ -379,6 +379,8 @@ public class BackgroundJobsTests
     public void Does_execute_MyCommand()
     {
         ResetState();
+        OrmLiteUtils.PrintSql();
+        feature.Jobs.StartAsync(default);
         feature.Jobs.EnqueueCommand<MyJobCommand>(new MyRequest { Id = 1 });
         
         Assert.That(ExecUtils.WaitUntilTrue(() => MyJobCommand.LastRequest != null), "LastRequest == null");
@@ -564,13 +566,13 @@ public class BackgroundJobsTests
         Assert.That(job.Response, Is.EqualTo(MyJobCallback.LastMyResponse!.GetType().Name));
         Assert.That(job.ResponseBody, Is.EqualTo(ClientConfig.ToJson(MyJobCallback.LastMyResponse)));
 
-        using var db = feature.OpenJobsDb();
+        using var db = feature.OpenDb();
         Assert.That(ExecUtils.WaitUntilTrue(() => db.SingleById<BackgroundJob>(job.Id) == null), "job != null");
         var dbJobSummary = db.SingleById<JobSummary>(job.Id);
         Assert.That(dbJobSummary, Is.Not.Null);
         Assert.That(dbJobSummary.CompletedDate, Is.Not.Null);
         Assert.That(dbJobSummary.Response, Is.EqualTo(job.Response));
-        using var monthDb = feature.OpenJobsMonthDb(job.CreatedDate);
+        using var monthDb = feature.OpenMonthDb(job.CreatedDate);
         
         var dbCompletedJob = monthDb.SingleById<CompletedJob>(job.Id);
         Assert.That(dbCompletedJob.CompletedDate, Is.Not.Null);
@@ -673,9 +675,9 @@ public class BackgroundJobsTests
         Assert.That(await ExecUtils.WaitUntilTrueAsync(() => AlwaysFailCommand.Count >= 3, timeout), "AlwaysFailCommand.Count < 3");
         Assert.That(AlwaysFailCommand.Count, Is.EqualTo(3));
 
-        using var db = feature.OpenJobsDb();
+        using var db = feature.OpenDb();
         
-        using var monthDb = feature.OpenJobsMonthDb(DateTime.UtcNow);
+        using var monthDb = feature.OpenMonthDb(DateTime.UtcNow);
 
         FailedJob? failedJob = null;
         Assert.That(await ExecUtils.WaitUntilTrueAsync(() => {
@@ -720,9 +722,9 @@ public class BackgroundJobsTests
         Assert.That(await ExecUtils.WaitUntilTrueAsync(() => JobServices.Count >= 3, timeout), "JobServices.Count < 3");
         Assert.That(JobServices.Count, Is.EqualTo(3));
 
-        using var db = feature.OpenJobsDb();
+        using var db = feature.OpenDb();
         
-        using var monthDb = feature.OpenJobsMonthDb(DateTime.UtcNow);
+        using var monthDb = feature.OpenMonthDb(DateTime.UtcNow);
 
         FailedJob? failedJob = null;
         Assert.That(await ExecUtils.WaitUntilTrueAsync(() => {
@@ -881,7 +883,7 @@ public class BackgroundJobsTests
     {
         ResetState();
 
-        using var db = feature.Jobs.OpenJobsDb();
+        using var db = feature.Jobs.OpenDb();
         var taskName = "My Command Every Minute";
         var options = new BackgroundJobOptions { Tag = "test" };
         var startedAt = DateTime.UtcNow;
@@ -930,7 +932,7 @@ public class BackgroundJobsTests
     {
         ResetState();
 
-        using var db = feature.Jobs.OpenJobsDb();
+        using var db = feature.Jobs.OpenDb();
         var taskName = "My API Every Minute";
         var options = new BackgroundJobOptions { Tag = "test" };
         var startedAt = DateTime.UtcNow;

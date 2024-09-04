@@ -20,7 +20,7 @@ public class BackgroundsJobFeature : IPlugin, Model.IHasStringId, IConfigureServ
     public Func<IDbConnectionFactory, IDbConnection> ResolveAppDb { get; set; }
     public Func<IDbConnectionFactory, DateTime, IDbConnection> ResolveMonthDb { get; set; }
     public bool AutoInitSchema { get; set; } = true;
-    public bool EnableAdmin { get; set; } = false;
+    public bool EnableAdmin { get; set; } = true;
     public IDbConnectionFactory DbFactory { get; set; } = null!;
     public IAppHostNetCore AppHost { get; set; } = null!;
     public CommandsFeature CommandsFeature { get; set; } = null!;
@@ -50,6 +50,8 @@ public class BackgroundsJobFeature : IPlugin, Model.IHasStringId, IConfigureServ
 
         if (EnableAdmin)
         {
+            services.RegisterService<AdminJobServices>();
+
             // Background Jobs Admin UI requires AutoQuery functionality
             ServiceStackHost.GlobalAfterConfigureServices.Add(c =>
             {
@@ -83,7 +85,8 @@ public class BackgroundsJobFeature : IPlugin, Model.IHasStringId, IConfigureServ
         if (AutoInitSchema)
         {
             InitSchema();
-            InitMonthDbSchema(DateTime.UtcNow);
+            using var monthDb = OpenMonthDb(DateTime.UtcNow);
+            InitMonthDbSchema(monthDb);
         }
     }
     
@@ -115,23 +118,31 @@ public class BackgroundsJobFeature : IPlugin, Model.IHasStringId, IConfigureServ
         {
             var dataSource = AppHost.HostingEnvironment.ContentRootPath.CombineWith(DbDir, monthDb);
             dbFactory.RegisterConnection(monthDb, $"DataSource={dataSource};Cache=Shared", SqliteDialect.Provider);
+            var db = dbFactory.OpenDbConnection(monthDb);
+            InitMonthDbSchema(db);
+            return db;
         }
         return dbFactory.OpenDbConnection(monthDb);
     }
 
-    public IDbConnection OpenJobsDb() => ResolveAppDb(DbFactory);
-    public IDbConnection OpenJobsMonthDb(DateTime createdDate) => ResolveMonthDb(DbFactory, createdDate);
+    public IDbConnection OpenDb() => ResolveAppDb(DbFactory);
+    public IDbConnection OpenMonthDb(DateTime createdDate) => ResolveMonthDb(DbFactory, createdDate);
 
     public void InitSchema()
     {
-        using var db = OpenJobsDb();
+        using var db = OpenDb();
+        InitSchema(db);
+    }
+
+    public void InitSchema(IDbConnection db)
+    {
         db.CreateTableIfNotExists<BackgroundJob>();
         db.CreateTableIfNotExists<JobSummary>();
         db.CreateTableIfNotExists<ScheduledTask>();
     }
-    public void InitMonthDbSchema(DateTime createdDate)
+    
+    public void InitMonthDbSchema(IDbConnection db)
     {
-        using var db = OpenJobsMonthDb(createdDate);
         db.CreateTableIfNotExists<CompletedJob>();
         db.CreateTableIfNotExists<FailedJob>();
     }

@@ -26,6 +26,11 @@ export class App {
     OnStart = []
     Components = {}
 
+    provide(name,provider) {
+        if (provider)
+            this.Providers[name] = provider
+        return this.Providers[name]
+    }
     provides(providers) {
         Object.keys(providers).forEach(k => this.Providers[k] = providers[k])
     }
@@ -80,7 +85,7 @@ export class App {
 }
 
 /**
- * @template {Record<<string,Function>} T
+ * @template {Record<string,Function>} T
  * Maintain page route state:
  *  - /{pageKey}?{queryKeys}
  * @remarks
@@ -124,10 +129,10 @@ export function usePageRoutes(app, { page, queryKeys, handlers, extend }) {
         ...each(allKeys, (o,x) => o[x] = ''),
         start() {
             window.addEventListener('popstate', (event) => {
-                this.set({ [page]:getPage(), ...event.state})
+                this.set({ [page]:getPage(), ...event.state, $clear:true})
                 publish('init', state(this))
             })
-            console.log('routes.start()', page, getPage())
+            console.debug('routes.start()', page, getPage())
             
             this.set({ [page]:getPage(), ...(location.search ? queryString(location.search) : {}) })
             publish('init', state(this))
@@ -313,7 +318,7 @@ export function sortOps(ops) {
     return ops
 }
 
-let defaultIcon = globalThis.Server.ui.theme.modelIcon ||
+let defaultIcon = globalThis.Server?.ui.theme.modelIcon ||
     { svg:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12v6s0 3 7 3s7-3 7-3v-6"/><path d="M5 6v6s0 3 7 3s7-3 7-3V6"/><path d="M12 3c7 0 7 3 7 3s0 3-7 3s-7-3-7-3s0-3 7-3Z"/></g></svg>` }
 
 /** Get API Icon

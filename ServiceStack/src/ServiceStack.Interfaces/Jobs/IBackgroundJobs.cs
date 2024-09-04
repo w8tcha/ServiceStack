@@ -1,4 +1,4 @@
-#nullable enable
+ #nullable enable
 
 using System;
 using System.Data;
@@ -16,8 +16,9 @@ public interface IBackgroundJobs
     BackgroundJob RunCommand(string commandName, object arg, BackgroundJobOptions? options = null);
     Task<object?> RunCommandAsync(string commandName, object arg, BackgroundJobOptions? options = null);
     Task ExecuteJobAsync(BackgroundJob job);
-    void CancelJob(long jobId);
+    bool CancelJob(long jobId);
     void CancelWorker(string worker);
+    void RequeueFailedJob(long jobId);
     void FailJob(BackgroundJob job, Exception ex);
     void FailJob(BackgroundJob job, ResponseStatus error, bool shouldRetry);
     void CompleteJob(BackgroundJob job, object? response = null);
@@ -26,8 +27,8 @@ public interface IBackgroundJobs
     Task TickAsync();
     Dictionary<string, int> GetWorkerQueueCounts();
     List<WorkerStats> GetWorkerStats();
-    IDbConnection OpenJobsDb();
-    IDbConnection OpenJobsMonthDb(DateTime createdDate);
+    IDbConnection OpenDb();
+    IDbConnection OpenMonthDb(DateTime createdDate);
     JobResult? GetJob(long jobId);
     JobResult? GetJobByRefId(string refId);
     object CreateRequest(BackgroundJobBase job);
@@ -36,8 +37,8 @@ public interface IBackgroundJobs
     void RecurringApi(string taskName, Schedule schedule, object requestDto, BackgroundJobOptions? options = null);
     void RecurringCommand(string taskName, Schedule schedule, string commandName, object arg, BackgroundJobOptions? options = null);
     void DeleteRecurringTask(string taskName);
-    int? GetCommandEstimatedDurationMs(string commandType);
-    int? GetApiEstimatedDurationMs(string requestType);
+    int? GetCommandEstimatedDurationMs(string commandType, string? worker=null);
+    int? GetApiEstimatedDurationMs(string requestType, string? worker=null);
 }
 
 public class BackgroundJobRef(long id, string refId)

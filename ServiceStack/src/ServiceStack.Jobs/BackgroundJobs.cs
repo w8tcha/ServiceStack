@@ -44,7 +44,11 @@ public partial class BackgroundJobs : IBackgroundJobs
             Logs:dialect.GetQuotedColumnName(nameof(BackgroundJob.Logs)),
             Status:dialect.GetQuotedColumnName(nameof(BackgroundJob.Status)),
             Progress:dialect.GetQuotedColumnName(nameof(BackgroundJob.Progress)),
-            Id:dialect.GetQuotedColumnName(nameof(BackgroundJob.Id))
+            Id:dialect.GetQuotedColumnName(nameof(BackgroundJob.Id)),
+            Request:dialect.GetQuotedColumnName(nameof(BackgroundJob.Request)),
+            Command:dialect.GetQuotedColumnName(nameof(BackgroundJob.Command)),
+            Worker:dialect.GetQuotedColumnName(nameof(BackgroundJob.Worker)),
+            DurationMs:dialect.GetQuotedColumnName(nameof(BackgroundJob.DurationMs))
         );
     }
 
@@ -83,7 +87,7 @@ public partial class BackgroundJobs : IBackgroundJobs
     private BackgroundJobRef RecordAndDispatchJob(BackgroundJob job)
     {
         var requestId = Guid.NewGuid().ToString("N");
-        using var db = feature.OpenJobsDb();
+         using var db = feature.OpenDb();
         var now = DateTime.UtcNow;
         if (job.RunAfter == null || now > job.RunAfter)
         {
@@ -224,15 +228,41 @@ public partial class BackgroundJobs : IBackgroundJobs
         return response;
     }
 
-    public int? GetCommandEstimatedDurationMs(string commandType) =>
-        lastCommandDurations.TryGetValue(commandType, out var lastDuration) 
-            ? lastDuration 
-            : null;
-    
-    public int? GetApiEstimatedDurationMs(string requestType) =>
-        lastApiDurations.TryGetValue(requestType, out var lastDuration) 
-            ? lastDuration 
-            : null;
+    public int? GetCommandEstimatedDurationMs(string commandType, string? worker=null)
+    {
+        if (worker != null && lastCommandDurations.TryGetValue($"{commandType}.{worker}", out var lastDuration))
+            return lastDuration;
+        if (lastCommandDurations.TryGetValue(commandType, out lastDuration))
+            return lastDuration;
+
+        // Return best matching duration
+        var prefix = commandType + ".";
+        var keys = lastCommandDurations.Keys.Where(x => x == commandType || x.StartsWith(prefix)).ToList();
+        foreach (var key in keys)
+        {
+            if (lastCommandDurations.TryGetValue(key, out lastDuration))
+                return lastDuration;
+        }
+        return null;
+    }
+
+    public int? GetApiEstimatedDurationMs(string requestType, string? worker=null)
+    {
+        if (worker != null && lastApiDurations.TryGetValue($"{requestType}.{worker}", out var lastDuration))
+            return lastDuration;
+        if (lastApiDurations.TryGetValue(requestType, out lastDuration))
+            return lastDuration;
+
+        // Return best matching duration
+        var prefix = requestType + ".";
+        var keys = lastApiDurations.Keys.Where(x => x == requestType || x.StartsWith(prefix)).ToList();
+        foreach (var key in keys)
+        {
+            if (lastApiDurations.TryGetValue(key, out lastDuration))
+                return lastDuration;
+        }
+        return null;
+    }
 
     object DeserializeFromJson(string json, Type type)
     {
@@ -311,7 +341,7 @@ public partial class BackgroundJobs : IBackgroundJobs
             {
                 lock (dbWrites)
                 {
-                    using var db = feature.OpenJobsDb();
+                    using var db = feature.OpenDb();
                     db.UpdateOnly(() => new BackgroundJob
                     {
                         StartedDate = job.StartedDate,
@@ -388,30 +418,70 @@ public partial class BackgroundJobs : IBackgroundJobs
         }
     }
 
-    public void CancelJob(long jobId)
+    public bool CancelJob(long jobId)
     {
         if (cancellationSources.TryGetValue(jobId, out var cts))
         {
             cts.Cancel();
+            return true;
         }
-        else
+        using var db = OpenDb();
+        var error = new TaskCanceledException("Job was cancelled").ToResponseStatus();
+        var updatedQueuedJob = db.UpdateOnly(() => new BackgroundJob {
+            State = BackgroundJobState.Cancelled,
+            Error = error,
+            ErrorCode = error.ErrorCode,
+            LastActivityDate = DateTime.UtcNow,
+        }, where: x => x.Id == jobId);
+        if (updatedQueuedJob > 0)
         {
-            using var db = OpenJobsDb();
-            var error = new TaskCanceledException("Job was cancelled").ToResponseStatus();
-            var updatedQueuedJob = db.UpdateOnly(() => new BackgroundJob {
+            cancelJobIds[jobId] = DateTime.UtcNow;
+            db.UpdateOnly(() => new JobSummary {
                 State = BackgroundJobState.Cancelled,
-                Error = error,
                 ErrorCode = error.ErrorCode,
-                LastActivityDate = DateTime.UtcNow,
+                ErrorMessage = error.Message,
             }, where: x => x.Id == jobId);
-            if (updatedQueuedJob > 0)
+            return true;
+        }
+        return false;
+    }
+
+    public void RequeueFailedJob(long jobId)
+    {
+        using var db = OpenDb();
+        var jobSummary = db.SingleById<JobSummary>(jobId);
+        if (jobSummary == null)
+            throw HttpError.NotFound("Job not found");
+
+        using var monthDb = OpenMonthDb(jobSummary.CreatedDate);
+        var failedJob = monthDb.SingleById<FailedJob>(jobId);
+        if (failedJob == null)
+            throw HttpError.NotFound("Job not found");
+
+        var requeueJob = failedJob.PopulateJob(new BackgroundJob());
+        requeueJob.State = BackgroundJobState.Queued;
+        requeueJob.RequestId = null;
+        requeueJob.Response = null;
+        requeueJob.ResponseBody = null;
+        requeueJob.Logs = null;
+        requeueJob.Error = null;
+        requeueJob.ErrorCode = null;
+        requeueJob.Attempts = 0;
+        requeueJob.DurationMs = 0;
+        requeueJob.StartedDate = requeueJob.LastActivityDate = DateTime.UtcNow;
+
+        lock (dbWrites)
+        {
+            var jobMetadata = typeof(BackgroundJob).GetModelMetadata();
+            try
             {
-                cancelJobIds[jobId] = DateTime.UtcNow;
-                db.UpdateOnly(() => new JobSummary {
-                    State = BackgroundJobState.Cancelled,
-                    ErrorCode = error.ErrorCode,
-                    ErrorMessage = error.Message,
-                }, where: x => x.Id == jobId);
+                jobMetadata.PrimaryKey.AutoIncrement = false;
+                db.Insert(requeueJob);
+                monthDb.DeleteById<FailedJob>(failedJob.Id);
+            }
+            finally
+            {
+                jobMetadata.PrimaryKey.AutoIncrement = true;
             }
         }
     }
@@ -451,7 +521,7 @@ public partial class BackgroundJobs : IBackgroundJobs
                     if (job.StartedDate != null)
                         job.DurationMs = (int)(job.LastActivityDate.Value - job.StartedDate.Value).TotalMilliseconds;
 
-                    using var dbMonth = feature.OpenJobsMonthDb(job.CreatedDate);
+                    using var dbMonth = feature.OpenMonthDb(job.CreatedDate);
                     var failedJob = job.PopulateJob(new FailedJob());
                     try
                     {
@@ -471,7 +541,7 @@ public partial class BackgroundJobs : IBackgroundJobs
                         }
                     }
 
-                    using var db = feature.OpenJobsDb();
+                    using var db = feature.OpenDb();
                     using var trans = db.OpenTransaction();
                     db.UpdateOnly(() => new BackgroundJob {
                         State = job.State,
@@ -525,7 +595,7 @@ public partial class BackgroundJobs : IBackgroundJobs
                     job.Attempts += 1;
                     job.State = BackgroundJobState.Queued;
                     job.StartedDate = DateTime.UtcNow;
-                    using var db = feature.OpenJobsDb();
+                    using var db = feature.OpenDb();
                     db.UpdateOnly(() => new BackgroundJob {
                         RequestId = job.RequestId,
                         State = job.State,
@@ -592,7 +662,7 @@ public partial class BackgroundJobs : IBackgroundJobs
 
     public void CompleteJob(BackgroundJob job, object? response=null)
     {
-        using var db = feature.OpenJobsDb();
+        using var db = feature.OpenDb();
 
         job.CompletedDate = job.LastActivityDate = DateTime.UtcNow;
         job.State = job.Callback != null ? BackgroundJobState.Executed : BackgroundJobState.Completed;
@@ -635,9 +705,9 @@ public partial class BackgroundJobs : IBackgroundJobs
         }
 
         if (job is { RequestType: CommandResult.Command, Command: not null, DurationMs: > 0 })
-            lastCommandDurations[job.Command] = job.DurationMs;
+            lastCommandDurations[job.Worker != null ? $"{job.Command}.{job.Worker}" : job.Command] = job.DurationMs;
         else if (job is { RequestType: CommandResult.Api, DurationMs: > 0 })
-            lastApiDurations[job.Request] = job.DurationMs;
+            lastApiDurations[job.Worker != null ? $"{job.Request}.{job.Worker}" : job.Request] = job.DurationMs;
 
         if (job.Callback != null)
         {
@@ -656,10 +726,10 @@ public partial class BackgroundJobs : IBackgroundJobs
         var now = DateTime.UtcNow;
         var requestId = Guid.NewGuid().ToString("N");
         var completedJob = job.PopulateJob(new CompletedJob());
-        using var db = feature.OpenJobsDb();
+        using var db = feature.OpenDb();
         lock (dbWrites)
         {
-            using var dbMonth = feature.OpenJobsMonthDb(job.CreatedDate);
+            using var dbMonth = feature.OpenMonthDb(job.CreatedDate);
             try
             {
                 dbMonth.Insert(completedJob);
@@ -717,12 +787,12 @@ public partial class BackgroundJobs : IBackgroundJobs
     }
 
     public List<WorkerStats> GetWorkerStats() => workers.Select(x => x.Value.GetStats()).ToList();
-    public IDbConnection OpenJobsDb() => feature.OpenJobsDb();
-    public IDbConnection OpenJobsMonthDb(DateTime createdDate) => feature.OpenJobsMonthDb(createdDate);
+    public IDbConnection OpenDb() => feature.OpenDb();
+    public IDbConnection OpenMonthDb(DateTime createdDate) => feature.OpenMonthDb(createdDate);
 
     public JobResult? GetJob(long jobId)
     {
-        using var db = OpenJobsDb(); 
+        using var db = OpenDb(); 
         var summary = db.SingleById<JobSummary>(jobId);
         if (summary == null)
             return null;
@@ -734,7 +804,7 @@ public partial class BackgroundJobs : IBackgroundJobs
         };
         if (to.Queued == null)
         {
-            using var dbMonth = OpenJobsMonthDb(summary.CreatedDate);
+            using var dbMonth = OpenMonthDb(summary.CreatedDate);
             to.Completed = dbMonth.SingleById<CompletedJob>(jobId);
             if (to.Completed == null)
                 to.Failed = dbMonth.SingleById<FailedJob>(jobId);
@@ -744,7 +814,7 @@ public partial class BackgroundJobs : IBackgroundJobs
 
     public JobResult? GetJobByRefId(string refId)
     {
-        using var db = OpenJobsDb(); 
+        using var db = OpenDb(); 
         var summary = db.Single<JobSummary>(x => x.RefId == refId);
         if (summary == null)
             return null;
@@ -756,7 +826,7 @@ public partial class BackgroundJobs : IBackgroundJobs
         };
         if (to.Queued == null)
         {
-            using var dbMonth = OpenJobsMonthDb(summary.CreatedDate);
+            using var dbMonth = OpenMonthDb(summary.CreatedDate);
             to.Completed = dbMonth.Single<CompletedJob>(x => x.RefId == refId);
             if (to.Completed == null)
                 to.Failed = dbMonth.Single<FailedJob>(x => x.RefId == refId);
@@ -812,7 +882,7 @@ public partial class BackgroundJobs : IBackgroundJobs
     /// </summary>
     private void LoadJobQueue()
     {
-        using var db = feature.OpenJobsDb();
+        using var db = feature.OpenDb();
         var requestId = Guid.NewGuid().ToString("N");
         var now = DateTime.UtcNow;
 
@@ -823,9 +893,12 @@ public partial class BackgroundJobs : IBackgroundJobs
                         .Where(x => x.State == BackgroundJobState.Completed
                                     && x.DurationMs > 0
                                     && x.RequestType == CommandResult.Command)
-                        .GroupBy(x => x.Command)
+                        .GroupBy(x => new { x.Command, x.Worker })
                         .Select(x => x.Id)))
-                .Select(x => new { x.Command, x.DurationMs }));
+                .Select(x => new {
+                    Command = Sql.Custom($"IIF({columns.Worker} is null, {columns.Command}, {columns.Command} || '.' || {columns.Worker}) AS Command, {columns.DurationMs}"), 
+                    x.DurationMs
+                }));
         lastCommandDurations = new(commandDurations);
         
         var apiDurations = db.Dictionary<string, int>(
@@ -835,9 +908,12 @@ public partial class BackgroundJobs : IBackgroundJobs
                         .Where(x => x.State == BackgroundJobState.Completed
                                     && x.DurationMs > 0
                                     && x.RequestType == CommandResult.Api)
-                        .GroupBy(x => x.Command)
+                        .GroupBy(x => new { x.Command, x.Worker })
                         .Select(x => x.Id)))
-                .Select(x => new { x.Request, x.DurationMs }));
+                .Select(x => new {
+                    Request = Sql.Custom($"IIF({columns.Worker} is null, {columns.Request}, {columns.Request} || '.' || {columns.Worker}) AS Request, {columns.DurationMs}"), 
+                    x.DurationMs
+                }));
         lastApiDurations = new(apiDurations);
 
         var completedJobs = db.Select<BackgroundJob>(x => x.CompletedDate != null);
@@ -884,7 +960,7 @@ public partial class BackgroundJobs : IBackgroundJobs
 
     public void DispatchPendingJobs()
     {
-        using var db = feature.OpenJobsDb();
+        using var db = feature.OpenDb();
         var expiredJobIds = new List<long>();
         var dependentJobIds = new List<long>();
         var scheduledJobIds = new List<long>();
@@ -980,13 +1056,13 @@ public partial class BackgroundJobs : IBackgroundJobs
         updates.Enqueue(status);
     }
 
-    record class Columns(string Logs, string Status, string Progress, string Id);
+    record class Columns(string Logs, string Status, string Progress, string Id, string Request, string Command, string Worker, string DurationMs);
 
     private void PerformDbUpdates()
     {
         if (updates.Count == 0) return;
 
-        using var db = feature.OpenJobsDb();
+        using var db = feature.OpenDb();
         while (updates.TryDequeue(out var update))
         {
             try
