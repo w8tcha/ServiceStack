@@ -12,7 +12,7 @@ public class BackgroundJobsWorker : IDisposable
     private long running = 0;
     public bool Running => Interlocked.Read(ref running) == 1;
     DateTime? lastRunStarted = null;
-    public TimeSpan? RunningTime => lastRunStarted != null ? DateTime.UtcNow - lastRunStarted.Value : null;
+    public TimeSpan? RunningTime => lastRunStarted != null ? DateTime.UtcNow - (lastRunStarted ?? DateTime.UtcNow) : null;
     
     private long tasksStarted = 0; 
     private long received = 0; 
@@ -26,6 +26,8 @@ public class BackgroundJobsWorker : IDisposable
     private bool cancelled;
     private bool disposed;
     private int defaultTimeOutSecs;
+    private BackgroundJob? runningJob;
+    public BackgroundJob? RunningJob => runningJob;
 
     public BackgroundJobsWorker(IBackgroundJobs jobs, CancellationToken ct, bool transient, int defaultTimeOutSecs)
     {
@@ -44,6 +46,7 @@ public class BackgroundJobsWorker : IDisposable
         Completed = completed,
         Retries = retries,
         Failed = failed,
+        RunningJob = runningJob?.Id,
         RunningTime = RunningTime,
     };
 
@@ -64,6 +67,11 @@ public class BackgroundJobsWorker : IDisposable
         }
     }
 
+    public bool HasJobQueued(long jobId)
+    {
+        return runningJob?.Id == jobId || Queue.Any(x => x.Id == jobId);
+    }
+
     record class JobWorkerContext(ConcurrentQueue<BackgroundJob> Queue, IBackgroundJobs Jobs, CancellationToken Token);
 
     // Runs on Worker Thread
@@ -81,6 +89,7 @@ public class BackgroundJobsWorker : IDisposable
                 {
                     try
                     {
+                        runningJob = job;
                         if (job.TimeoutSecs != null)
                             defaultTimeOutSecs = job.TimeoutSecs.Value;
                         
@@ -99,6 +108,7 @@ public class BackgroundJobsWorker : IDisposable
                     finally
                     {
                         lastRunStarted = null;
+                        runningJob = null;
                     }
                 }
             }
