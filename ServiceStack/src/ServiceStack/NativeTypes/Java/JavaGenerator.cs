@@ -39,6 +39,7 @@ public class JavaGenerator : ILangGenerator
 
         "java.math.*",
         "java.util.*",
+        "java.io.InputStream",
         "net.servicestack.client.*",
     };
 
@@ -506,7 +507,7 @@ public class JavaGenerator : ILangGenerator
 
                 var defaultName = prop.Name.PropertyStyle();
                 var fieldName = GetPropertyName(prop.Name);
-                if (fieldName == defaultName)
+                if (fieldName == defaultName || prop.DataMember?.Name != null)
                 {
                     sb.AppendLine($"public {propType} {fieldName} = null;");
                 }
@@ -572,11 +573,15 @@ public class JavaGenerator : ILangGenerator
                     if (attr.ConstructorArgs.Count > 1)
                         prefix = "// ";
 
+                    var props = attr.Attribute?.GetType().GetProperties() ?? [];
+                
                     foreach (var ctorArg in attr.ConstructorArgs)
                     {
                         if (args.Length > 0)
                             args.Append(", ");
-                        args.Append(TypeValue(ctorArg.Type, ctorArg.Value));
+
+                        var prop = props.FirstOrDefault(x => string.Equals(x.Name, ctorArg.Name, StringComparison.OrdinalIgnoreCase));
+                        args.Append($"{prop?.Name ?? ctorArg.Name}={TypeValue(ctorArg.Type, ctorArg.Value)}");
                     }
                 }
                 else if (attr.Args != null)
@@ -651,6 +656,8 @@ public class JavaGenerator : ILangGenerator
                 return $"ArrayList<{GenericArg(genericArgs[0])}>";
             if (ArrayTypes.Contains(type))
                 return "ArrayList<{0}>".Fmt(GenericArg(genericArgs[0])).StripNullable();
+            if (type.EndsWith("[]"))
+                return $"ArrayList<{Type(type.Substring(0,type.Length-2), genericArgs)}>".StripNullable();
             if (DictionaryTypes.Contains(type))
                 return "HashMap<{0},{1}>".Fmt(
                     GenericArg(genericArgs[0]),
@@ -946,20 +953,19 @@ public static class JavaGeneratorExtensions
             return new MetadataAttribute
             {
                 Name = "Route",
-                Args = new List<MetadataPropertyType> {
+                Args = [
                     new() { Name = "Path", Type = "string", Value = route.Path },
-                    new() { Name = "Verbs", Type = "string", Value = route.Verbs },
-                },
+                    new() { Name = "Verbs", Type = "string", Value = route.Verbs }
+                ],
             };
         }
 
         return new MetadataAttribute
         {
             Name = "Route",
-            ConstructorArgs = new List<MetadataPropertyType>
-            {
-                new() { Type = "string", Value = route.Path },
-            },
+            ConstructorArgs = [
+                new() { Name = "Path", Type = "string", Value = route.Path }
+            ],
         };
     }
 

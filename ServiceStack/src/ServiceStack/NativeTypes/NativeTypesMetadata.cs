@@ -454,7 +454,7 @@ public class MetadataTypesGenerator
             Type = type,
             Name = type.GetOperationName(),
             Namespace = type.Namespace,
-            GenericArgs = type.IsGenericType ? GetGenericArgs(type) : null,
+            GenericArgs = type.IsGenericType ? GetGenericTypeArgs(type) : null,
             Implements = ToInterfaces(type),
             Attributes = ToAttributes(type),
             Properties = ToProperties(type),
@@ -617,7 +617,15 @@ public class MetadataTypesGenerator
 
     private static string[] GetGenericArgs(Type type)
     {
-        return type.GetGenericArguments().Select(x => x.GetOperationName()).ToArray();
+        return type.GetGenericArguments().Select(x => x.GetOperationName()).ToArray(); 
+    }
+
+    private static string[] GetGenericTypeArgs(Type type)
+    {
+        var genericDef = type.IsGenericType ? type.GetGenericTypeDefinition() : null;
+        return genericDef != null 
+            ? genericDef.GetGenericArguments().Select(x => x.GetOperationName()).ToArray()
+            : type.GetGenericArguments().Select(x => x.GetOperationName()).ToArray();
     }
 
     private MetadataTypeName[] ToInterfaces(Type type)
@@ -1345,6 +1353,7 @@ public static class MetadataExtensions
 
     public static List<MetadataType> GetAllTypesOrdered(this MetadataTypes metadata)
     {
+        // return metadata.Types.OrderTypesByDeps();
         // Base Types need to be written first
         var types = metadata.Types.CreateSortedTypeList();
 
@@ -1420,6 +1429,13 @@ public static class MetadataExtensions
     {
         var deps = new Dictionary<string, List<string>>();
 
+        void Push(string type, string dep)
+        {
+            if (dep.EndsWith("[]"))
+                dep = dep.LastLeftPart('[');
+            deps.Push(type, dep);
+        }
+
         foreach (var type in types)
         {
             var typeName = type.Name;
@@ -1428,23 +1444,23 @@ public static class MetadataExtensions
             if (returnMarker != null)
             {
                 if (!returnMarker.GenericArgs.IsEmpty())
-                    type.RequestType.ReturnType.GenericArgs.Each(x => deps.Push(typeName, x));
+                    type.RequestType.ReturnType.GenericArgs.Each(x => Push(typeName, x));
                 else
-                    deps.Push(typeName, returnMarker.Name);
+                    Push(typeName, returnMarker.Name);
             }
             if (type.Inherits != null)
             {
                 if (!type.Inherits.GenericArgs.IsEmpty())
-                    type.Inherits.GenericArgs.Each(x => deps.Push(typeName, x));
+                    type.Inherits.GenericArgs.Each(x => Push(typeName, x));
                 else
-                    deps.Push(typeName, type.Inherits.Name);
+                    Push(typeName, type.Inherits.Name);
             }
             foreach (var p in type.Properties.Safe())
             {
                 if (!p.GenericArgs.IsEmpty())
-                    p.GenericArgs.Each(x => deps.Push(typeName, x));
+                    p.GenericArgs.Each(x => Push(typeName, x));
                 else
-                    deps.Push(typeName, p.Type);
+                    Push(typeName, p.Type);
             }
         }
 
