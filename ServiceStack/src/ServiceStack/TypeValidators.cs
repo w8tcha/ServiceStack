@@ -167,7 +167,6 @@ public class ApiKeyValidator(Func<IApiKeySource> factory, Func<IApiKeyResolver> 
     : TypeValidator(nameof(HttpStatusCode.Unauthorized), DefaultErrorMessage, 401), IApiKeyValidator
 {
     public static string DefaultErrorMessage { get; set; } = ErrorMessages.ApiKeyInvalid;
-    readonly ConcurrentDictionary<string, IApiKey> validApiKeys = new();
 
     private string? scope;
     public string? Scope
@@ -181,6 +180,19 @@ public class ApiKeyValidator(Func<IApiKeySource> factory, Func<IApiKeyResolver> 
             };
         }
     }
+    
+    public bool CanApiKeyAccess(IApiKey apiKey, Type requestType)
+    {
+        if (apiKey.HasScope(RoleNames.Admin))
+            return true;
+
+        if (!apiKey.CanAccess(requestType))
+            return false;
+                
+        if (Scope != null && !apiKey.HasScope(Scope))
+            return false;
+        return true;
+    }
 
     public override async Task<bool> IsValidAsync(object dto, IRequest request)
     {
@@ -192,26 +204,14 @@ public class ApiKeyValidator(Func<IApiKeySource> factory, Func<IApiKeyResolver> 
         var token = apiKeyResolver.GetApiKeyToken(request);
         if (token != null)
         {
-            if (validApiKeys.TryGetValue(token, out var apiKey))
-            {
-                request.Items[Keywords.ApiKey] = apiKey;
-                return true;
-            }
-
             var source = factory() ?? throw new ArgumentNullException(nameof(IApiKeySource));
-            apiKey = await source.GetApiKeyAsync(token);
+            var apiKey = await source.GetApiKeyAsync(token);
             if (apiKey != null)
             {
-                if (apiKey.HasScope(RoleNames.Admin))
-                    return true;
-
-                if (!apiKey.CanAccess(dto.GetType()))
+                var isValid = CanApiKeyAccess(apiKey, dto.GetType());
+                if (!isValid)
                     return false;
                 
-                if (Scope != null)
-                    return apiKey.HasScope(Scope);
-                
-                validApiKeys[token] = apiKey;
                 request.Items[Keywords.ApiKey] = apiKey;
                 return true;
             }
