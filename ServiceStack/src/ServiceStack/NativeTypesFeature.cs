@@ -16,10 +16,11 @@ public class NativeTypesFeature : IPlugin, IConfigureServices, Model.IHasStringI
         DefaultGenerator = new NativeTypesMetadata(new ServiceMetadata([]), MetadataTypesConfig).GetGenerator();
     }
 
-    public MetadataTypesConfig MetadataTypesConfig { get; set; } = new()
+    public static MetadataTypesConfig CreateMetadataTypesConfig() => new()
     {
         AddDefaultXmlNamespace = HostConfig.DefaultWsdlNamespace,
-        ExportAttributes = [
+        ExportAttributes =
+        [
             typeof(FlagsAttribute),
             typeof(ApiAttribute),
             typeof(ApiResponseAttribute),
@@ -109,6 +110,7 @@ public class NativeTypesFeature : IPlugin, IConfigureServices, Model.IHasStringI
             "ServiceStack.Model",
             "ServiceStack.Redis",
             "ServiceStack.Web",
+            "ServiceStack.Jobs",
             "ServiceStack.Admin",
             "ServiceStack.NativeTypes",
             "ServiceStack.Api.OpenApi"
@@ -116,6 +118,7 @@ public class NativeTypesFeature : IPlugin, IConfigureServices, Model.IHasStringI
         DefaultNamespaces =
         [
             "System",
+            "System.IO",
             "System.Collections",
             "System.Collections.Generic",
             "System.Runtime.Serialization",
@@ -123,6 +126,8 @@ public class NativeTypesFeature : IPlugin, IConfigureServices, Model.IHasStringI
             "ServiceStack.DataAnnotations"
         ],
     };
+
+    public MetadataTypesConfig MetadataTypesConfig { get; set; } = CreateMetadataTypesConfig();
 
     public static bool DisableTokenVerification { get; set; }
 

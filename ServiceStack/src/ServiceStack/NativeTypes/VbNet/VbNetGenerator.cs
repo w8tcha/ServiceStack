@@ -35,50 +35,161 @@ public class VbNetGenerator : ILangGenerator
     };
 
     public static HashSet<string> KeyWords = new() {
-        "Default",
-        "Dim",
-        "Catch",
+        "AddHandler",
+        "AddressOf",
+        "Alias",
+        "And",
+        "AndAlso",
+        "As",
+        "Boolean",
+        "ByRef",
         "Byte",
+        "ByVal",
+        "Call",
+        "Case",
+        "Catch",
+        "CBool",
+        "CByte",
+        "CChar",
+        "CDate",
+        "CDbl",
+        "CDec",
         "Char",
-        "Short",
-        "Integer",
-        "Long",
-        "UShort",
-        "ULong",
-        "Double",
-        "Decimal",
-        "String",
-        "Object",
-        "Each",
-        "Error",
-        "Finally",
-        "Function",
-        "Global",
-        "Is",
-        "If",
-        "Imports",
-        "Inherits",
-        "Not",
-        "IsNot",
-        "Module",
-        "MyBase",
-        "Option",
-        "Out",
-        "Protected",
-        "Return",
-        "Shadows",
-        "Static",
-        "Then",
-        "With",
-        "When",
-        "Operator",
+        "CInt",
         "Class",
+        "CLng",
+        "CObj",
+        "Const",
+        "Continue",
+        "CSByte",
+        "CShort",
+        "CSng",
+        "CStr",
+        "CType",
+        "CUInt",
+        "CULng",
+        "CUShort",
         "Date",
+        "Decimal",
+        "Declare",
+        "Default",
+        "Delegate",
+        "Dim",
+        "DirectCast",
+        "Do",
+        "Double",
+        "Each",
+        "Else",
+        "ElseIf",
         "End",
-        "end",
-        "True",
+        "EndIf",
+        "Enum",
+        "Erase",
+        "Error",
+        "Event",
+        "Exit",
         "False",
+        "Finally",
+        "For",
+        "Friend",
+        "Function",
+        "Get",
+        "GetType",
+        "GetXMLNamespace",
+        "Global",
+        "GoSub",
+        "GoTo",
+        "Handles",
+        "If",
+        "Implements",
+        "Implements Statement",
+        "Imports",
+        "In",
+        "Inherits",
+        "Integer",
+        "Interface",
+        "Is",
+        "IsNot",
+        "Let",
+        "Lib",
+        "Like",
+        "Long",
+        "Loop",
+        "Me",
         "Mod",
+        "Module",
+        "MustInherit",
+        "MustOverride",
+        "MyBase",
+        "MyClass",
+        "NameOf",
+        "Namespace",
+        "Narrowing",
+        "New",
+        "Next",
+        "Not",
+        "Nothing",
+        "NotInheritable",
+        "NotOverridable",
+        "Object",
+        "Of",
+        "On",
+        "Operator",
+        "Option",
+        "Optional",
+        "Or",
+        "OrElse",
+        "Out",
+        "Overloads",
+        "Overridable",
+        "Overrides",
+        "ParamArray",
+        "Partial",
+        "Private",
+        "Property",
+        "Protected",
+        "Public",
+        "RaiseEvent",
+        "ReadOnly",
+        "ReDim",
+        "REM",
+        "RemoveHandler",
+        "Resume",
+        "Return",
+        "SByte",
+        "Select",
+        "Set",
+        "Shadows",
+        "Shared",
+        "Short",
+        "Single",
+        "Static",
+        "Step",
+        "Stop",
+        "String",
+        "Structure",
+        "Sub",
+        "SyncLock",
+        "Then",
+        "Throw",
+        "To",
+        "True",
+        "Try",
+        "TryCast",
+        "TypeOf",
+        "UInteger",
+        "ULong",
+        "UShort",
+        "Using",
+        "Variant",
+        "Wend",
+        "When",
+        "While",
+        "Widening",
+        "With",
+        "WithEvents",
+        "WriteOnly",
+        "Xor",
     };
 
     public static TypeFilterDelegate TypeFilter { get; set; }
@@ -241,9 +352,9 @@ public class VbNetGenerator : ILangGenerator
                                 if (operation?.ReturnsVoid == true)
                                     return nameof(IReturnVoid);
                                 if (operation?.ReturnType != null)
-                                    return Type("IReturn`1", new[] { Type(operation.ReturnType) });
+                                    return Type("IReturn`1", [Type(operation.ReturnType)]);
                                 return response != null
-                                    ? Type("IReturn`1", new[] { Type(response.Name, response.GenericArgs) })
+                                    ? Type("IReturn`1", [Type(response.Name, response.GenericArgs)])
                                     : null;
                             },
                             IsRequest = true,
@@ -315,7 +426,7 @@ public class VbNetGenerator : ILangGenerator
             AppendAttributes(sb, options.Routes.ConvertAll(x => x.ToMetadataAttribute()));
         }
         AppendAttributes(sb, type.Attributes);
-        AppendDataContract(sb, type.DataContract);
+        if (type.IsInterface != true) AppendDataContract(sb, type.DataContract);
         if (Config.AddGeneratedCodeAttributes)
             sb.AppendLine($"<GeneratedCode(\"AddServiceStackReference\", \"{Env.VersionString}\")>");
 
@@ -339,18 +450,19 @@ public class VbNetGenerator : ILangGenerator
                     var memberValue = type.GetEnumMemberValue(i);
                     if (memberValue != null)
                     {
-                        AppendAttributes(sb, new List<MetadataAttribute> {
-                            new MetadataAttribute {
+                        AppendAttributes(sb, [
+                            new MetadataAttribute
+                            {
                                 Name = "EnumMember",
-                                Args = new List<MetadataPropertyType> {
+                                Args = [
                                     new() {
                                         Name = "Value",
                                         Value = memberValue,
                                         Type = "String",
                                     }
-                                }
+                                ]
                             }
-                        });
+                        ]);
                     }
                     sb.AppendLine(value == null 
                         ? $"{name}"
@@ -399,7 +511,21 @@ public class VbNetGenerator : ILangGenerator
             InnerTypeFilter?.Invoke(sb, type);
 
             AddConstructor(sb, type, options);
-            AddProperties(sb, type,
+
+            var explicitInterfacesMap = new Dictionary<string, string>();
+            if (type.Implements?.Length > 0)
+            {
+                foreach (var iface in type.Type.GetInterfaces())
+                {
+                    if (type.Implements.All(x => x.Name != iface.Name)) continue;
+                    foreach (var member in iface.GetMembers())
+                    {
+                        explicitInterfacesMap[member.Name] = $"{iface.Name}.{member.Name}";
+                    }
+                }
+            }
+            
+            AddProperties(sb, type, explicitInterfacesMap,
                 includeResponseStatus: Config.AddResponseStatus && options.IsResponse
                                                                 && type.Properties.Safe().All(x => x.Name != nameof(ResponseStatus)));
 
@@ -430,42 +556,29 @@ public class VbNetGenerator : ILangGenerator
         if (type.IsInterface())
             return;
 
-        if (Config.AddImplicitVersion == null && !Config.InitializeCollections)
+        if (Config.AddImplicitVersion == null)
             return;
 
-        var collectionProps = new List<MetadataPropertyType>();
-        if (type.Properties != null && Config.InitializeCollections)
-            collectionProps = type.Properties.Where(x => x.IsCollection() && feature.ShouldInitializeCollection(type)).ToList();
-
         var addVersionInfo = Config.AddImplicitVersion != null && options.IsRequest;
-        if (!addVersionInfo && collectionProps.Count <= 0) return;
+        if (!addVersionInfo) return;
 
-        if (addVersionInfo)
-        {
-            var @virtual = Config.MakeVirtual ? "Overridable " : "";
-            sb.AppendLine("Public {0}Property Version As Integer".Fmt(@virtual));
-            sb.AppendLine();
-        }
+        var @virtual = Config.MakeVirtual ? "Overridable " : "";
+        sb.AppendLine("Public {0}Property Version As Integer".Fmt(@virtual));
+        sb.AppendLine();
 
         sb.AppendLine("Public Sub New()".Fmt(NameOnly(type.Name)));
-        //sb.AppendLine("{");
         sb = sb.Indent();
 
-        if (addVersionInfo)
-            sb.AppendLine("Version = {0}".Fmt(Config.AddImplicitVersion));
-
-        foreach (var prop in collectionProps)
-        {
-            var suffix = prop.IsArray() ? "{}" : "";
-            sb.AppendLine($"{GetPropertyName(prop.Name)} = New {Type(prop.Type, prop.GenericArgs,true)}{suffix}");
-        }
+        sb.AppendLine("Version = {0}".Fmt(Config.AddImplicitVersion));
 
         sb = sb.UnIndent();
         sb.AppendLine("End Sub");
         sb.AppendLine();
     }
 
-    public void AddProperties(StringBuilderWrapper sb, MetadataType type, bool includeResponseStatus)
+    public void AddProperties(StringBuilderWrapper sb, MetadataType type, 
+        Dictionary<string,string> explicitInterfacesMap, 
+        bool includeResponseStatus)
     {
         var makeExtensible = Config.MakeDataContractsExtensible && type.Inherits == null;
 
@@ -489,11 +602,22 @@ public class VbNetGenerator : ILangGenerator
 
                 sb.Emit(prop, Lang.Vb);
                 PrePropertyFilter?.Invoke(sb, prop, type);
-                sb.AppendLine("{0}{1}Property {2} As {3}".Fmt(
+                var explicitInterface = explicitInterfacesMap.TryGetValue(prop.Name, out var name)
+                    ? $" Implements {name}"
+                    : "";
+                
+                var initializer = (prop.IsRequired == true || Config.InitializeCollections) 
+                                  && prop.IsEnumerable() && feature.ShouldInitializeCollection(type) && !prop.IsInterface()
+                    ? $" = New {Type(prop.Type, prop.GenericArgs,true)}" + (prop.IsArray() ? "{}" : "")
+                    : "";
+
+                sb.AppendLine(string.Format("{0}{1}Property {2} As {3}{4}{5}",
                     visibility,
                     @virtual,
                     GetPropertyName(prop.Name), 
-                    propType));
+                    propType,
+                    explicitInterface,
+                    initializer));
                 PostPropertyFilter?.Invoke(sb, prop, type);
             }
         }
@@ -612,8 +736,13 @@ public class VbNetGenerator : ILangGenerator
 
         if (genericArgs != null)
         {
-            if (type == "Nullable`1")
-                return $"Nullable(Of {TypeAlias(genericArgs[0], includeNested: includeNested)})";
+            if (type.StartsWith("Nullable`1"))
+            {
+                var nullableType = $"{TypeAlias(genericArgs[0], includeNested: includeNested)}?";
+                return type.IndexOf('[') == -1
+                    ? nullableType
+                    : nullableType + "()";
+            }
 
             var parts = type.Split('`');
             if (parts.Length > 1)

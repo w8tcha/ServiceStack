@@ -129,7 +129,7 @@ api.Response.PrintDump()`
 }
 /*:raw*/
 
-const InstallTool = {
+const InstallToolNet = {
     template:`<h2 class="text-lg p-4">
         To easily update DTOs for all APIs install the 
         <em><b>x</b></em> <a class="text-blue-600 underline" href="https://docs.servicestack.net/dotnet-tool">dotnet tool</a>
@@ -151,7 +151,23 @@ const InstallTool = {
         return { BaseUrl, create, update }
     }
 }
-const components = { InstallTool }
+const InstallTool = {
+    template:`
+    <h2 class="text-lg p-4">To generate all DTOs for <b>{{BaseUrl}}</b> run:</h2>
+
+    <CopyLine prefix="$ " :text="create" />
+
+    <h2 class="text-lg p-4">Once generated, the DTOs can be updated with:</h2>
+
+    <CopyLine prefix="$ " :text="update" />`,
+    props:['lang'],
+    setup(props) {
+        const create = `npx get-dtos ${props.lang} ${BaseUrl}`
+        const update = `npx get-dtos ${props.lang}`
+        return { BaseUrl, create, update }
+    }
+}
+const components = { InstallToolNet, InstallTool }
 
 const CSharp = {
     components,
@@ -177,7 +193,7 @@ const CSharp = {
           <pre><code class="language-csharp" v-highlightjs="usage"></code></pre>
         </div>
 
-        <InstallTool lang="csharp" />
+        <InstallToolNet lang="csharp" />
     </div>`,
     props:['src','usage'],
     setup() {
@@ -267,7 +283,7 @@ const Dart = {
       <b class="mr-2">1.</b> Include <b>servicestack</b> package in your projects<em>pubspec.yaml</em>
     </p>
 
-    <CopyLine text="servicestack: ^3.0.0" />
+    <CopyLine text="servicestack: ^3.0.1" />
 
     <div class="text-lg p-4 flex">
       <div><b class="mr-2">2.</b> Copy the DTOs source code for this API</div>
@@ -295,7 +311,7 @@ const Java = {
       <b class="mr-2">1.</b> Include <b>net.servicestack:client</b> package in your projects<em>build.gradle</em>
     </p>
 
-    <CopyLine text="implementation 'net.servicestack:client:1.1.0'" />
+    <CopyLine text="implementation 'net.servicestack:client:1.1.3'" />
 
     <div class="text-lg p-4 flex">
       <div><b class="mr-2">2.</b> Copy the DTOs source code for this API</div>
@@ -323,7 +339,7 @@ const Kotlin = {
       <b class="mr-2">1.</b> Include <b>net.servicestack:client</b> package in your projects<em>build.gradle</em>
     </p>
 
-    <CopyLine text="implementation 'net.servicestack:client:1.1.0'" />
+    <CopyLine text="implementation 'net.servicestack:client:1.1.3'" />
 
     <div class="text-lg p-4 flex">
       <div><b class="mr-2">2.</b> Copy the DTOs source code for this API</div>
@@ -348,10 +364,10 @@ const Python = {
     template:`<div>
     <h2 class="text-2xl pl-4 pb-3 border-b pt-4 pb-3 w-full bg-white">Call this API from Python</h2>
     <p class="text-lg p-4">
-        <b class="mr-2">1.</b> Include <b>servicestack</b> package in your projects<em>requirements.txt</em>
+        <b class="mr-2">1.</b> Install the <b>servicestack</b> PyPI package
     </p>
 
-    <CopyLine text="servicestack>=0.1.3" />
+    <CopyLine text="pip install servicestack" />
 
     <div class="text-lg p-4 flex">
       <div><b class="mr-2">2.</b> Copy the DTOs source code for this API</div>
@@ -433,10 +449,9 @@ const Swift = {
     props:['src','usage'],
     setup() {
         let pkg = `dependencies: [
-    .package(name: "ServiceStack", 
-        url: "https://github.com/ServiceStack/ServiceStack.Swift.git", 
-        Version(5,0,0)..&lt;Version(6,0,0)),
-]`
+    .package(url: "https://github.com/ServiceStack/ServiceStack.Swift.git",
+        Version(6,0,0)..&lt;Version(7,0,0)),
+],`
         return { pkg }
     }
 }
@@ -464,7 +479,7 @@ const VbNet = {
       <pre><code class="language-vbnet" v-highlightjs="usage"></code></pre>
     </div>
 
-    <InstallTool lang="vbnet" />
+    <InstallToolNet lang="vbnet" />
     </div>`,
     props:['src','usage'],
     setup() {
@@ -495,7 +510,7 @@ const FSharp = {
       <pre><code class="language-fsharp" v-highlightjs="usage"></code></pre>
     </div>
 
-    <InstallTool lang="fsharp" />
+    <InstallToolNet lang="fsharp" />
     </div>`,
     props:['src','usage'],
     setup() {
