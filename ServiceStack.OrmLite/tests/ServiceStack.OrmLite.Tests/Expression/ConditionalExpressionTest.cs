@@ -193,4 +193,40 @@ public class ConditionalExpressionTest(DialectContext context) : ExpressionsTest
         Assert.That(rows.Count, Is.EqualTo(1));
         Assert.That(q.Params.Count, Is.EqualTo(2),  "The second \"dateTime\" constant is not transformed into Sql param.");
     }
+
+	[Test]
+	public void Can_use_coalesce_with_nullable_bool()
+	{
+		using var db = OpenDbConnection();
+        db.Insert(new TestType { NullableBoolColumn = true });
+        db.Insert(new TestType { NullableBoolColumn = true });
+		db.Insert(new TestType { NullableBoolColumn = true });
+		db.Insert(new TestType { NullableBoolColumn = false });
+		db.Insert(new TestType { NullableBoolColumn = null });
+
+		var q = db.From<TestType>()
+            .Where(q => q.NullableBoolColumn ?? false);
+		var rows = db.Select(q);
+        Assert.That(rows.Count, Is.EqualTo(3));
+
+        q = db.From<TestType>()
+            .Where(q => (q.NullableBoolColumn ?? false) == true);
+        rows = db.Select(q);
+        Assert.That(rows.Count, Is.EqualTo(3));
+
+        q = db.From<TestType>()
+            .Where(q => q.NullableBoolColumn ?? true);
+        rows = db.Select(q);
+        Assert.That(rows.Count, Is.EqualTo(4));
+
+        q = db.From<TestType>()
+            .Where(q => (q.NullableBoolColumn ?? false) == false);
+		rows = db.Select(q);
+        Assert.That(rows.Count, Is.EqualTo(2));
+
+		q = db.From<TestType>()
+            .Where(q => q.NullableBoolColumn == null);
+		rows = db.Select(q);
+		Assert.That(rows.Count, Is.EqualTo(1));
+	}
 }
