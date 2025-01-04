@@ -1,9 +1,9 @@
-﻿using ServiceStack;
+using ServiceStack;
 
-namespace Check.ServiceInterface;
+namespace MyApp.ServiceInterface;
 
-[Route("/compress/{Path*}")]
-public class CompressFile
+[Route("/compress/{**Path}")]
+public class CompressFile : IGet, IReturn<byte[]>
 {
     public string Path { get; set; }
 }
