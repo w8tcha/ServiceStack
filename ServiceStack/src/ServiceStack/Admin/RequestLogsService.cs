@@ -36,6 +36,7 @@ public class RequestLogs : IGet, IReturn<RequestLogsResponse>
     [DataMember(Order=20)] public int Skip { get; set; }
     [DataMember(Order=21)] public int? Take { get; set; }
     [DataMember(Order=22)] public string OrderBy { get; set; }
+    [DataMember(Order=23)] public DateTime? Month { get; set; }
 }
 
 [DataContract]
@@ -48,13 +49,44 @@ public class RequestLogsResponse
 }
 
 [DataContract]
-public class GetAnalyticsReports : IGet, IReturn<AnalyticsReports>
+public class GetAnalyticsReports : IGet, IReturn<GetAnalyticsReportsResponse>
 {
     [DataMember(Order=1)] 
     public DateTime? Month { get; set; }
 
     [DataMember(Order=2)] 
     public string Filter { get; set; }
+}
+[DataContract]
+public class GetAnalyticsReportsResponse
+{
+    [DataMember(Order=1)]
+    public AnalyticsReports Results { get; set; } = new();
+
+    [DataMember(Order=2)]
+    public List<string> Months { get; set; } = new();
+    
+    [DataMember(Order=3)]
+    public ResponseStatus ResponseStatus { get; set; }
+}
+
+[DataContract]
+public class AnalyticsReports
+{
+    [DataMember(Order=1)] public long Id { get; set; } // Use last Id of RequestLog
+    [DataMember(Order=2)] public DateTime Created { get; set; } // When it was created
+    [DataMember(Order=1)] public decimal Version { get; set; } // ServiceStack Version
+    [DataMember(Order=2)] public Dictionary<string, RequestSummary> Apis { get; set; }
+    [DataMember(Order=3)] public Dictionary<string, RequestSummary> Users { get; set; }
+    [DataMember(Order=4)] public Dictionary<string, RequestSummary> Tags { get; set; }
+    [DataMember(Order=5)] public Dictionary<string, RequestSummary> Status { get; set; }
+    [DataMember(Order=6)] public Dictionary<string, RequestSummary> Days { get; set; }
+    [DataMember(Order=7)] public Dictionary<string, RequestSummary> ApiKeys { get; set; }
+    [DataMember(Order=8)] public Dictionary<string, RequestSummary> IpAddresses { get; set; }
+    [DataMember(Order=9)] public Dictionary<string, RequestSummary> Browsers { get; set; }
+    [DataMember(Order=10)] public Dictionary<string, RequestSummary> Devices { get; set; }
+    [DataMember(Order=11)] public Dictionary<string, RequestSummary> Bots { get; set; }
+    [DataMember(Order=12)] public Dictionary<string, long> DurationRange { get; set; }
 }
 
 public enum AnalyticsType
@@ -84,27 +116,18 @@ public class GetApiAnalyticsResponse
 }
 
 [DataContract]
-public class AnalyticsReports
-{
-    [DataMember(Order=1)] public Dictionary<string, RequestSummary> Apis { get; set; }
-    [DataMember(Order=2)] public Dictionary<string, RequestSummary> Users { get; set; }
-    [DataMember(Order=3)] public Dictionary<string, RequestSummary> Tags { get; set; }
-    [DataMember(Order=4)] public Dictionary<string, RequestSummary> Status { get; set; }
-    [DataMember(Order=5)] public Dictionary<string, RequestSummary> Days { get; set; }
-    [DataMember(Order=6)] public Dictionary<string, RequestSummary> ApiKeys { get; set; }
-    [DataMember(Order=7)] public Dictionary<string, RequestSummary> IpAddresses { get; set; }
-    [DataMember(Order=8)] public Dictionary<string, long> DurationRange { get; set; }
-}
-
-[DataContract]
 public class RequestSummary
 {
     // op,user,tag,status,day,apikey,time(ms 0-50,51-100,101-200ms,1-2s,2s-5s,5s+)
     // public string Type { get; set; }
     [DataMember(Order=1)] public string Name { get; set; }
-    [DataMember(Order=2)] public long Requests { get; set; }
-    [DataMember(Order=3)] public long RequestLength { get; set; }
-    [DataMember(Order=4)] public double Duration { get; set; }
+    [DataMember(Order=2)] public long TotalRequests { get; set; }
+    [DataMember(Order=3)] public long TotalRequestLength { get; set; }
+    [DataMember(Order=3)] public long MinRequestLength { get; set; }
+    [DataMember(Order=3)] public long MaxRequestLength { get; set; }
+    [DataMember(Order=4)] public double TotalDuration { get; set; }
+    [DataMember(Order=4)] public double MinDuration { get; set; }
+    [DataMember(Order=4)] public double MaxDuration { get; set; }
     [DataMember(Order=5)] public Dictionary<int,long> Status { get; set; }
 }
 
@@ -142,12 +165,21 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
         if (request.EnableSessionTracking.HasValue)
             requestLogger.EnableSessionTracking = request.EnableSessionTracking.Value;
 
-        var defaultLimit = feature?.DefaultLimit ?? 100;
+        request.Take ??= feature.DefaultLimit;
 
-        var now = DateTime.UtcNow;
-        var snapshot = requestLogger.GetLatestLogs(null);
+        if (requestLogger is IRequireAnalytics analytics)
+        {
+            var results = analytics.QueryLogs(request);
+            return new RequestLogsResponse {
+                Results = results.ToList(),
+                Total = (int)analytics.GetTotal(request.Month ?? DateTime.UtcNow),
+                Usage = Usage,
+            };
+        }
+
+        var snapshot =  requestLogger.GetLatestLogs(null);
         var logs = snapshot.AsQueryable();
-
+        var now = DateTime.UtcNow;
         if (request.BeforeSecs.HasValue)
             logs = logs.Where(x => (now - x.DateTime) <= TimeSpan.FromSeconds(request.BeforeSecs.Value));
         if (request.AfterSecs.HasValue)
@@ -185,11 +217,11 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
             ? logs.OrderByDescending(x => x.Id)
             : logs.OrderBy(request.OrderBy);
 
-        var results = query.Skip(request.Skip);
-        results = results.Take(request.Take.GetValueOrDefault(defaultLimit));
+        query = query.Skip(request.Skip);
+        query = query.Take(request.Take.Value);
 
         return new RequestLogsResponse {
-            Results = results.ToList(),
+            Results = query.ToList(),
             Total = snapshot.Count,
             Usage = Usage,
         };
@@ -204,6 +236,20 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
         if (feature.RequestLogger is not IRequireAnalytics analytics)
             throw new NotSupportedException(feature.RequestLogger + " does not support IRequireAnalytics");
 
+        if (request.Filter == "info")
+        {
+            return new GetAnalyticsReportsResponse
+            {
+                Months = analytics.GetAnalyticInfo(feature.AnalyticsConfig).Months,
+                Results = new AnalyticsReports
+                {
+                    Id = 0,
+                    Created = DateTime.UtcNow,
+                    Version = Env.ServiceStackVersion,
+                },
+            };
+        }
+
         var ret = analytics.GetAnalyticsReports(feature.AnalyticsConfig, request.Month ?? DateTime.UtcNow);
         foreach (var item in ret.IpAddresses.ToList())
         {
@@ -212,7 +258,7 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
 
         var topIpAddresses = new Dictionary<string, RequestSummary>();
         var top100Addresses = ret.IpAddresses.Values
-            .OrderByDescending(x => x.RequestLength)
+            .OrderByDescending(x => x.TotalRequestLength)
             .Take(feature.AnalyticsConfig.IpLimit);
         foreach (var item in top100Addresses)
         {
@@ -245,7 +291,7 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
             }
         }
 
-        return request.Filter?.ToLower() switch
+        var results = request.Filter?.ToLower() switch
         {
             "apis" or "api" => new AnalyticsReports { Apis = ret.Apis },
             "users" => new AnalyticsReports { Users = ret.Users },
@@ -254,8 +300,20 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
             "days" => new AnalyticsReports { Days = ret.Days },
             "apikeys" => new AnalyticsReports { ApiKeys = ret.ApiKeys },
             "ipaddresses" or "ip" => new AnalyticsReports { IpAddresses = ret.IpAddresses },
+            "browsers" => new AnalyticsReports { Browsers = ret.Browsers, Bots = ret.Bots, Devices = ret.Devices },
             "durationrange" or "duration" => new AnalyticsReports { DurationRange = ret.DurationRange },
             _ => ret,
+        };
+
+        results.Id = ret.Id;
+        results.Created = ret.Created;
+        results.Version = ret.Version;
+        var info = analytics.GetAnalyticInfo(feature.AnalyticsConfig);
+
+        return new GetAnalyticsReportsResponse
+        {
+            Months = info.Months,
+            Results = results,
         };
     }
 

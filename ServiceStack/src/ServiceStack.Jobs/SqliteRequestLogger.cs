@@ -99,6 +99,7 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
 
     public Func<IDbConnectionFactory, DateTime, IDbConnection> ResolveMonthDb { get; set; }
     public Func<DateTime, string> DbMonthFile { get; set; } = DefaultDbMonthFile;
+    public Func<List<string>> ResolveMonthDbs { get; set; }
     public int MaxLimit { get; set; } = 5000;
     public bool AutoInitSchema { get; set; } = true;
     public IDbConnectionFactory DbFactory { get; set; } = null!;
@@ -107,6 +108,7 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
     public SqliteRequestLogger()
     {
         ResolveMonthDb = DefaultResolveMonthDb;
+        ResolveMonthDbs = DefaultResolveMonthDbs;
     }
 
     public override void Log(IRequest request, object requestDto, object response, TimeSpan requestDuration)
@@ -149,17 +151,66 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
         logEntries.Enqueue(entry);
     }
 
+    public long GetTotal(DateTime month)
+    {
+        using var db = OpenMonthDb(month);
+        return db.Count(db.From<RequestLog>());
+    }
+
+    public List<RequestLogEntry> QueryLogs(RequestLogs request)
+    {
+        using var db = OpenMonthDb(request.Month ?? DateTime.UtcNow);
+        var now = DateTime.UtcNow;
+        var take = request.Take ?? MaxLimit;
+        
+        var q = db.From<RequestLog>();
+        if (request.BeforeSecs.HasValue)
+            q = q.Where(x => (now - x.DateTime) <= TimeSpan.FromSeconds(request.BeforeSecs.Value));
+        if (request.AfterSecs.HasValue)
+            q = q.Where(x => (now - x.DateTime) > TimeSpan.FromSeconds(request.AfterSecs.Value));
+        if (!request.OperationName.IsNullOrEmpty())
+            q = q.Where(x => x.OperationName == request.OperationName);
+        if (!request.IpAddress.IsNullOrEmpty())
+            q = q.Where(x => x.IpAddress == request.IpAddress);
+        if (!request.ForwardedFor.IsNullOrEmpty())
+            q = q.Where(x => x.ForwardedFor == request.ForwardedFor);
+        if (!request.UserAuthId.IsNullOrEmpty())
+            q = q.Where(x => x.UserAuthId == request.UserAuthId);
+        if (!request.SessionId.IsNullOrEmpty())
+            q = q.Where(x => x.SessionId == request.SessionId);
+        if (!request.Referer.IsNullOrEmpty())
+            q = q.Where(x => x.Referer == request.Referer);
+        if (!request.PathInfo.IsNullOrEmpty())
+            q = q.Where(x => x.PathInfo == request.PathInfo);
+        if (!request.Ids.IsEmpty())
+            q = q.Where(x => request.Ids.Contains(x.Id));
+        if (request.BeforeId.HasValue)
+            q = q.Where(x => x.Id <= request.BeforeId);
+        if (request.AfterId.HasValue)
+            q = q.Where(x => x.Id > request.AfterId);
+        if (request.WithErrors.HasValue)
+            q = request.WithErrors.Value
+                ? q.Where(x => x.Error != null || x.StatusCode >= 400)
+                : q.Where(x => x.Error == null);
+        if (request.DurationLongerThan.HasValue)
+            q = q.Where(x => x.RequestDuration > request.DurationLongerThan.Value);
+        if (request.DurationLessThan.HasValue)
+            q = q.Where(x => x.RequestDuration < request.DurationLessThan.Value);
+        q = string.IsNullOrEmpty(request.OrderBy)
+            ? q.OrderByDescending(x => x.Id)
+            : q.OrderBy(request.OrderBy);
+        q = request.Skip > 0
+            ? q.Limit(request.Skip, take)
+            : q.Limit(take);
+        
+        var results = db.Select(q);
+        var to = results.Map(ToRequestLogEntry);
+        return to;
+    }
+
     public override List<RequestLogEntry> GetLatestLogs(int? take)
     {
-        using var db = OpenMonthDb(DateTime.UtcNow);
-
-        var dbLogs = db.Select(db.From<RequestLog>()
-            .Where(x => x.DateTime >= DateTime.UtcNow.Date)
-            .Take(take ?? MaxLimit)
-            .OrderByDescending(x => x.Id));
-        
-        var to = dbLogs.Map(ToRequestLogEntry);
-        return to;
+        return QueryLogs(new RequestLogs { Take =  take });
     }
 
     public void Tick(ILogger log)
@@ -215,6 +266,15 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
     }
 
     public static string DefaultDbMonthFile(DateTime createdDate) => $"requests_{createdDate.Year}-{createdDate.Month:00}.db";
+
+    public List<string> DefaultResolveMonthDbs()
+    {
+        var requestsDir = AppHost.HostingEnvironment.ContentRootPath.CombineWith(DbDir);
+        var dir = new DirectoryInfo(requestsDir);
+        var files = dir.GetMatchingFiles("requests_*.db");
+        return files.ToList();
+    }
+    
     public IDbConnection DefaultResolveMonthDb(IDbConnectionFactory dbFactory, DateTime createdDate)
     {
         var monthDb = DbMonthFile(createdDate);
@@ -248,7 +308,7 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
         {
             Id = from.Id,
             TraceId = from.TraceId,
-            OperationName = from.OperationName,
+            OperationName = from.OperationName ?? from.RequestDto?.GetType().Name,
             DateTime = from.DateTime,
             StatusCode = from.StatusCode,
             StatusDescription = from.StatusDescription,
@@ -284,7 +344,7 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
         {
             Id = from.Id,
             TraceId = from.TraceId,
-            OperationName = from.OperationName,
+            OperationName = from.OperationName ?? from.Request,
             DateTime = from.DateTime,
             StatusCode = from.StatusCode,
             StatusDescription = from.StatusDescription,
@@ -312,9 +372,40 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
         };
     }
 
+    public AnalyticsInfo GetAnalyticInfo(AnalyticsConfig config)
+    {
+        var monthDbs = ResolveMonthDbs().Map(x => x.Replace('\\','/')); 
+        return new AnalyticsInfo
+        {
+            Months = monthDbs.Map(x => x.LastRightPart('/').RightPart('_').LeftPart('.'))
+                .OrderBy(x => x).ToList()
+        };
+    }
+
     public AnalyticsReports GetAnalyticsReports(AnalyticsConfig config, DateTime month)
     {
-        // op,user,tag,status,day,apikey,time(ms 0-50,51-100,101-200ms,1-2s,2s-5s,5s+)
+        using var db = OpenMonthDb(month);
+
+        var tableExists = db.TableExists<AnalyticsReports>();
+        var lastLogId = tableExists
+            ? db.Single(db.From<RequestLog>().OrderByDescending(x => x.Id).Limit(1))?.Id
+            : null;
+
+        AnalyticsReports? cachedReport = null;
+        try
+        {
+            // Ignore schema changes, table is recreated when cached
+            cachedReport = lastLogId != null
+                ? db.SingleById<AnalyticsReports>(lastLogId)
+                : null;
+        } catch (Exception ignore) {}
+
+        if (cachedReport != null)
+            return cachedReport;
+        
+        List<RequestLog> batch = [];
+        long lastPk = 0;
+        var metadata = HostContext.Metadata;
         var ret = new AnalyticsReports
         {
             Apis = new(),
@@ -324,31 +415,49 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
             Days = new(),
             ApiKeys = new(),
             IpAddresses = new(),
+            Browsers = new(),
+            Devices = new(),
+            Bots = new(),
             DurationRange = new(),
         }; 
-        using var db = OpenMonthDb(month);
-        List<RequestLog> batch = [];
-        long lastPk = 0;
-        var metadata = HostContext.Metadata;
 
         void Add(Dictionary<string, RequestSummary> results, string name, RequestLog log)
         {
             var summary = results.TryGetValue(name, out var existing)
                 ? existing
                 : results[name] = new();
+            
+            summary.TotalRequests += 1;
 
-            summary.Requests += 1;
-            summary.Duration += log.RequestDuration.TotalMilliseconds;
-            summary.RequestLength += log.RequestBody?.Length ?? 0;
+            var len = log.RequestBody?.Length ?? 0;
+            summary.TotalRequestLength += len;
+            if (len > 0)
+            {
+                if (summary.MinRequestLength == 0 || len < summary.MinRequestLength)
+                    summary.MinRequestLength = len;
+                if (summary.MaxRequestLength == 0 || len > summary.MaxRequestLength)
+                    summary.MaxRequestLength = len;
+            }
+            
+            var duration = log.RequestDuration.TotalMilliseconds; 
+            summary.TotalDuration += duration;
+            if (duration > 0 && log.StatusCode is >= 200 and < 300)
+            {
+                if (summary.MinDuration == 0 || duration < summary.MinDuration)
+                    summary.MinDuration = duration;
+                if (summary.MaxDuration == 0 || duration > summary.MaxDuration)
+                    summary.MaxDuration = duration;
+            }
+            
         }
         void AddSummary(Dictionary<string, RequestSummary> results, string name, RequestSummary apiSummary)
         {
             var summary = results.TryGetValue(name, out var existing)
                 ? existing
                 : results[name] = new();
-            summary.Requests += apiSummary.Requests;
-            summary.Duration += apiSummary.Duration;
-            summary.RequestLength += apiSummary.RequestLength;
+            summary.TotalRequests += apiSummary.TotalRequests;
+            summary.TotalDuration += apiSummary.TotalDuration;
+            summary.TotalRequestLength += apiSummary.TotalRequestLength;
         }
         
         do {
@@ -385,7 +494,9 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
 
                 Add(ret.Days, requestLog.DateTime.Day.ToString(), requestLog);
 
-                if ((requestLog.Headers.TryGetValue(HttpHeaders.Authorization, out var authorization) && authorization.StartsWith("ak-")) ||
+                var headers = new Dictionary<string, string>(requestLog.Headers ?? new(), StringComparer.OrdinalIgnoreCase);
+
+                if ((headers.TryGetValue(HttpHeaders.Authorization, out var authorization) && authorization.StartsWith("ak-")) ||
                     requestLog.Meta?.TryGetValue("apikey", out authorization) == true)
                 {
                     Add(ret.ApiKeys, authorization, requestLog);
@@ -393,6 +504,26 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
                 
                 if (requestLog.IpAddress != null)
                     Add(ret.IpAddresses, requestLog.IpAddress, requestLog);
+
+                if (headers.TryGetValue(HttpHeaders.UserAgent, out var userAgent) && !string.IsNullOrEmpty(userAgent))
+                {
+                    if (UserAgentHelper.IsBotUserAgent(userAgent, out var botName))
+                    {
+                        Add(ret.Browsers, "Bot", requestLog);
+                        Add(ret.Bots, botName, requestLog);
+                    }
+                    else
+                    {
+                        var (browser, version) = UserAgentHelper.GetBrowserInfo(userAgent);
+                        Add(ret.Browsers, browser, requestLog);
+                        Add(ret.Devices, UserAgentHelper.GetDeviceType(userAgent), requestLog);
+                    }
+                }
+                else
+                {
+                    Add(ret.Browsers, "None", requestLog);
+                    Add(ret.Devices, "None", requestLog);
+                }
 
                 var totalMs = (int)requestLog.RequestDuration.TotalMilliseconds;
 
@@ -418,6 +549,10 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
                 lastPk = requestLog.Id;
             }
         } while(batch.Count >= config.BatchSize);
+
+        ret.Id = lastPk;
+        ret.Created = DateTime.UtcNow;
+        ret.Version = Env.ServiceStackVersion;
 
         foreach (var entry in ret.Status)
         {
@@ -450,7 +585,7 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
         {
             foreach (var entry in results.Values)
             {
-                entry.Duration = Math.Floor(entry.Duration);
+                entry.TotalDuration = Math.Floor(entry.TotalDuration);
             }
         }
         
@@ -461,6 +596,9 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
         Clean(ret.Days);
         Clean(ret.ApiKeys);
         Clean(ret.IpAddresses);
+        
+        db.DropAndCreateTable<AnalyticsReports>();
+        db.Insert(ret);
         
         return ret;
     }
