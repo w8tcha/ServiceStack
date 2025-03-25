@@ -31,8 +31,9 @@ public enum AdminUiFeature
 public class AnalyticsConfig
 {
     public int BatchSize { get; set; } = 1000;
-    public int[] DurationRanges { get; set; } = [10, 50, 100, 200, 1000, 2000, 5000, 30000];
-    public int IpLimit { get; set; } = 100;
+    public int[] DurationRanges { get; set; } = [10, 50, 100, 500, 1000, 2000, 5000, 30000];
+    public int SummaryLimit { get; set; } = 100;
+    public int DetailLimit { get; set; } = 10;
 }
 
 public class AnalyticsInfo
@@ -44,6 +45,7 @@ public interface IRequireAnalytics
 {
     long GetTotal(DateTime month);
     List<RequestLogEntry> QueryLogs(RequestLogs request);
+    void ClearAnalyticsCaches(DateTime month);
     AnalyticsInfo GetAnalyticInfo(AnalyticsConfig config);
     AnalyticsReports GetAnalyticsReports(AnalyticsConfig config, DateTime month);
     Dictionary<string, long> GetApiAnalytics(AnalyticsConfig config, DateTime month, AnalyticsType type, string value);

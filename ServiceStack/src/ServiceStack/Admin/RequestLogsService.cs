@@ -23,20 +23,21 @@ public class RequestLogs : IGet, IReturn<RequestLogsResponse>
     [DataMember(Order=7)] public string SessionId { get; set; }
     [DataMember(Order=8)] public string Referer { get; set; }
     [DataMember(Order=9)] public string PathInfo { get; set; }
-    [DataMember(Order=10)] public long[] Ids { get; set; }
-    [DataMember(Order=11)] public int? BeforeId { get; set; }
-    [DataMember(Order=12)] public int? AfterId { get; set; }
-    [DataMember(Order=13)] public bool? HasResponse { get; set; }
-    [DataMember(Order=14)] public bool? WithErrors { get; set; }
-    [DataMember(Order=15)] public bool? EnableSessionTracking { get; set; }
-    [DataMember(Order=16)] public bool? EnableResponseTracking { get; set; }
-    [DataMember(Order=17)] public bool? EnableErrorTracking { get; set; }
-    [DataMember(Order=18)] public TimeSpan? DurationLongerThan { get; set; }
-    [DataMember(Order=19)] public TimeSpan? DurationLessThan { get; set; }
-    [DataMember(Order=20)] public int Skip { get; set; }
-    [DataMember(Order=21)] public int? Take { get; set; }
-    [DataMember(Order=22)] public string OrderBy { get; set; }
-    [DataMember(Order=23)] public DateTime? Month { get; set; }
+    [DataMember(Order=10)] public string BearerToken { get; set; }
+    [DataMember(Order=11)] public long[] Ids { get; set; }
+    [DataMember(Order=12)] public int? BeforeId { get; set; }
+    [DataMember(Order=13)] public int? AfterId { get; set; }
+    [DataMember(Order=14)] public bool? HasResponse { get; set; }
+    [DataMember(Order=15)] public bool? WithErrors { get; set; }
+    [DataMember(Order=16)] public bool? EnableSessionTracking { get; set; }
+    [DataMember(Order=17)] public bool? EnableResponseTracking { get; set; }
+    [DataMember(Order=18)] public bool? EnableErrorTracking { get; set; }
+    [DataMember(Order=19)] public TimeSpan? DurationLongerThan { get; set; }
+    [DataMember(Order=20)] public TimeSpan? DurationLessThan { get; set; }
+    [DataMember(Order=21)] public int Skip { get; set; }
+    [DataMember(Order=22)] public int? Take { get; set; }
+    [DataMember(Order=23)] public string OrderBy { get; set; }
+    [DataMember(Order=24)] public DateTime? Month { get; set; }
 }
 
 [DataContract]
@@ -49,6 +50,55 @@ public class RequestLogsResponse
 }
 
 [DataContract]
+public class GetAnalyticsInfo : IGet, IReturn<GetAnalyticsInfoResponse>
+{
+    [DataMember(Order=1)] 
+    public DateTime? Month { get; set; }
+    [DataMember(Order=2)] 
+    public string Type { get; set; }
+    [DataMember(Order=3)] 
+    public string Op { get; set; }
+    [DataMember(Order=4)] 
+    public string ApiKey { get; set; }
+    [DataMember(Order=5)] 
+    public string UserId { get; set; }
+    [DataMember(Order=6)] 
+    public string Ip { get; set; }
+}
+[DataContract]
+public class AnalyticsLogInfo
+{
+    [DataMember(Order=1)]
+    public long Id { get; set; }
+    [DataMember(Order=2)]
+    public string Browser { get; set; }
+    [DataMember(Order=3)]
+    public string Device { get; set; }
+    [DataMember(Order=4)]
+    public string Bot { get; set; }
+    [DataMember(Order=5)]
+    public string Op { get; set; }
+    [DataMember(Order=6)]
+    public string UserId { get; set; }
+    [DataMember(Order=7)]
+    public string UserName { get; set; }
+    [DataMember(Order=8)]
+    public string ApiKey { get; set; }
+    [DataMember(Order=9)]
+    public string Ip { get; set; }
+}
+[DataContract]
+public class GetAnalyticsInfoResponse
+{
+    [DataMember(Order=1)]
+    public List<string> Months { get; set; }
+    [DataMember(Order=2)]
+    public AnalyticsLogInfo Result { get; set; }
+    [DataMember(Order=3)]
+    public ResponseStatus ResponseStatus { get; set; }
+}
+
+[DataContract]
 public class GetAnalyticsReports : IGet, IReturn<GetAnalyticsReportsResponse>
 {
     [DataMember(Order=1)] 
@@ -56,6 +106,9 @@ public class GetAnalyticsReports : IGet, IReturn<GetAnalyticsReportsResponse>
 
     [DataMember(Order=2)] 
     public string Filter { get; set; }
+
+    [DataMember(Order=3)] 
+    public bool? Force { get; set; }
 }
 [DataContract]
 public class GetAnalyticsReportsResponse
@@ -75,18 +128,18 @@ public class AnalyticsReports
 {
     [DataMember(Order=1)] public long Id { get; set; } // Use last Id of RequestLog
     [DataMember(Order=2)] public DateTime Created { get; set; } // When it was created
-    [DataMember(Order=1)] public decimal Version { get; set; } // ServiceStack Version
-    [DataMember(Order=2)] public Dictionary<string, RequestSummary> Apis { get; set; }
-    [DataMember(Order=3)] public Dictionary<string, RequestSummary> Users { get; set; }
-    [DataMember(Order=4)] public Dictionary<string, RequestSummary> Tags { get; set; }
-    [DataMember(Order=5)] public Dictionary<string, RequestSummary> Status { get; set; }
-    [DataMember(Order=6)] public Dictionary<string, RequestSummary> Days { get; set; }
-    [DataMember(Order=7)] public Dictionary<string, RequestSummary> ApiKeys { get; set; }
-    [DataMember(Order=8)] public Dictionary<string, RequestSummary> IpAddresses { get; set; }
-    [DataMember(Order=9)] public Dictionary<string, RequestSummary> Browsers { get; set; }
-    [DataMember(Order=10)] public Dictionary<string, RequestSummary> Devices { get; set; }
-    [DataMember(Order=11)] public Dictionary<string, RequestSummary> Bots { get; set; }
-    [DataMember(Order=12)] public Dictionary<string, long> DurationRange { get; set; }
+    [DataMember(Order=3)] public decimal Version { get; set; } // ServiceStack Version
+    [DataMember(Order=4)] public Dictionary<string, RequestSummary> Apis { get; set; }
+    [DataMember(Order=5)] public Dictionary<string, RequestSummary> Users { get; set; }
+    [DataMember(Order=6)] public Dictionary<string, RequestSummary> Tags { get; set; }
+    [DataMember(Order=7)] public Dictionary<string, RequestSummary> Status { get; set; }
+    [DataMember(Order=8)] public Dictionary<string, RequestSummary> Days { get; set; }
+    [DataMember(Order=9)] public Dictionary<string, RequestSummary> ApiKeys { get; set; }
+    [DataMember(Order=10)] public Dictionary<string, RequestSummary> Ips { get; set; }
+    [DataMember(Order=11)] public Dictionary<string, RequestSummary> Browsers { get; set; }
+    [DataMember(Order=12)] public Dictionary<string, RequestSummary> Devices { get; set; }
+    [DataMember(Order=13)] public Dictionary<string, RequestSummary> Bots { get; set; }
+    [DataMember(Order=14)] public Dictionary<string, long> Durations { get; set; }
 }
 
 public enum AnalyticsType
@@ -94,7 +147,7 @@ public enum AnalyticsType
     User,
     Day,
     ApiKey,
-    IpAddress,
+    Ips,
 }
 
 [DataContract]
@@ -113,6 +166,9 @@ public class GetApiAnalyticsResponse
 {
     [DataMember(Order=1)]
     public Dictionary<string, long> Results { get; set; } = new();
+    
+    [DataMember(Order=2)]
+    public ResponseStatus ResponseStatus { get; set; }
 }
 
 [DataContract]
@@ -123,12 +179,17 @@ public class RequestSummary
     [DataMember(Order=1)] public string Name { get; set; }
     [DataMember(Order=2)] public long TotalRequests { get; set; }
     [DataMember(Order=3)] public long TotalRequestLength { get; set; }
-    [DataMember(Order=3)] public long MinRequestLength { get; set; }
-    [DataMember(Order=3)] public long MaxRequestLength { get; set; }
-    [DataMember(Order=4)] public double TotalDuration { get; set; }
-    [DataMember(Order=4)] public double MinDuration { get; set; }
-    [DataMember(Order=4)] public double MaxDuration { get; set; }
-    [DataMember(Order=5)] public Dictionary<int,long> Status { get; set; }
+    [DataMember(Order=4)] public long MinRequestLength { get; set; }
+    [DataMember(Order=5)] public long MaxRequestLength { get; set; }
+    [DataMember(Order=6)] public double TotalDuration { get; set; }
+    [DataMember(Order=7)] public double MinDuration { get; set; }
+    [DataMember(Order=8)] public double MaxDuration { get; set; }
+    [DataMember(Order=9)] public Dictionary<int,long> Status { get; set; }
+    [DataMember(Order=10)] public Dictionary<string, long> Durations { get; set; }
+    [DataMember(Order=11)] public Dictionary<string, long> Apis { get; set; }
+    [DataMember(Order=12)] public Dictionary<string, long> Users { get; set; }
+    [DataMember(Order=13)] public Dictionary<string, long> Ips { get; set; }
+    [DataMember(Order=14)] public Dictionary<string, long> ApiKeys { get; set; }
 }
 
 [DefaultRequest(typeof(RequestLogs))]
@@ -156,12 +217,24 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
         {"string OrderBy",              "Order results by specified fields, e.g. SessionId,-Id"},
     };
 
-    public async Task<object> Any(RequestLogs request)
+    private async Task<RequestLogsFeature> AssertRequiredRole()
     {
         var feature = AssertPlugin<RequestLogsFeature>();
-        if (!HostContext.DebugMode)
-            await RequiredRoleAttribute.AssertRequiredRoleAsync(Request, feature.AccessRole);
+        await RequiredRoleAttribute.AssertRequiredRoleAsync(Request, feature.AccessRole);
+        return feature;
+    }
+    
+    private async Task<(RequestLogsFeature, IRequireAnalytics)> AssertRequireAnalytics()
+    {
+        var feature = await AssertRequiredRole().ConfigAwait();
+        if (feature.RequestLogger is not IRequireAnalytics analytics)
+            throw new NotSupportedException(feature.RequestLogger + " does not support IRequireAnalytics");
+        return (feature, analytics);
+    }
 
+    public async Task<object> Any(RequestLogs request)
+    {
+        var feature = await AssertRequiredRole().ConfigAwait();
         if (request.EnableSessionTracking.HasValue)
             requestLogger.EnableSessionTracking = request.EnableSessionTracking.Value;
 
@@ -227,45 +300,95 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
         };
     }
 
-    public async Task<object> Any(GetAnalyticsReports request)
+    public async Task<object> Any(GetAnalyticsInfo request)
     {
-        var feature = AssertPlugin<RequestLogsFeature>();
-        if (!HostContext.DebugMode)
-            await RequiredRoleAttribute.AssertRequiredRoleAsync(Request, feature.AccessRole);
-
-        if (feature.RequestLogger is not IRequireAnalytics analytics)
-            throw new NotSupportedException(feature.RequestLogger + " does not support IRequireAnalytics");
-
-        if (request.Filter == "info")
+        var (feature, analytics) = await AssertRequireAnalytics().ConfigAwait();
+        if (request.Type == "info")
         {
-            return new GetAnalyticsReportsResponse
+            return new GetAnalyticsInfoResponse
             {
                 Months = analytics.GetAnalyticInfo(feature.AnalyticsConfig).Months,
-                Results = new AnalyticsReports
-                {
-                    Id = 0,
-                    Created = DateTime.UtcNow,
-                    Version = Env.ServiceStackVersion,
-                },
             };
         }
 
+        var query = new RequestLogs
+        {
+            Month = request.Month,
+            OperationName = request.Op,
+            UserAuthId = request.UserId,
+            BearerToken = request.ApiKey,
+            IpAddress = request.Ip,
+            Take = 1,
+        };
+        var results = analytics.QueryLogs(query);
+        if (results.Count > 0)
+        {
+            var log = results[0];
+            var info = new AnalyticsLogInfo
+            {
+                Id = log.Id,
+                Op = log.OperationName ?? log.RequestDto?.GetType().Name,
+                UserId = log.UserAuthId,
+                Ip = log.IpAddress,
+            };
+
+            var headers = new Dictionary<string, string>(log.Headers ?? new(), StringComparer.OrdinalIgnoreCase);
+            if (headers.TryGetValue(HttpHeaders.UserAgent, out var userAgent) && !string.IsNullOrEmpty(userAgent))
+            {
+                if (UserAgentHelper.IsBotUserAgent(userAgent, out var botName))
+                {
+                    info.Browser = "Bot";
+                    info.Bot = botName;
+                }
+                else
+                {
+                    var (browser, version) = UserAgentHelper.GetBrowserInfo(userAgent);
+                    info.Browser = browser;
+                    info.Device = UserAgentHelper.GetDeviceType(userAgent);
+                }
+            }
+            if (log.Meta?.TryGetValue("username", out var username) == true)
+            {
+                info.UserName = username;
+            }
+            if (headers.TryGetValue(HttpHeaders.Authorization, out var authorization) 
+                && authorization.StartsWith("Bearer ak-", StringComparison.OrdinalIgnoreCase))
+            {
+                info.ApiKey = authorization.RightPart(' ');
+            }
+            
+            return new GetAnalyticsInfoResponse
+            {
+                Result = info,
+            };
+        }
+        return new GetAnalyticsInfoResponse();
+    }
+
+    public async Task<object> Any(GetAnalyticsReports request)
+    {
+        var (feature, analytics) = await AssertRequireAnalytics().ConfigAwait();
+        if (request.Force == true)
+        {
+            if (request.Month != null)
+            {
+                analytics.ClearAnalyticsCaches(request.Month.Value);
+            }
+            else
+            {
+                var months = analytics.GetAnalyticInfo(feature.AnalyticsConfig).Months;
+                foreach (var month in months)
+                {
+                    analytics.ClearAnalyticsCaches(DateTime.Parse(month + "-01"));
+                }
+            }
+        }
+
         var ret = analytics.GetAnalyticsReports(feature.AnalyticsConfig, request.Month ?? DateTime.UtcNow);
-        foreach (var item in ret.IpAddresses.ToList())
+        foreach (var item in ret.Ips.ToList())
         {
             item.Value.Name = item.Key;
         }
-
-        var topIpAddresses = new Dictionary<string, RequestSummary>();
-        var top100Addresses = ret.IpAddresses.Values
-            .OrderByDescending(x => x.TotalRequestLength)
-            .Take(feature.AnalyticsConfig.IpLimit);
-        foreach (var item in top100Addresses)
-        {
-            topIpAddresses[item.Name] = item;
-            item.Name = null;
-        }
-        ret.IpAddresses = topIpAddresses;
 
         var userResolver = Request?.TryResolve<IUserResolver>();
         if (userResolver != null)
@@ -279,7 +402,10 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
                 if (user.TryGetValue(nameof(IUserAuth.Id), out var oId)
                     && user.TryGetValue(nameof(IUserAuth.UserName), out var oUserName))
                 {
-                    allUsersMap[oId.ToString()!] = oUserName.ToString();
+                    if (oId != null && oUserName != null)
+                    {
+                        allUsersMap[oId.ToString()!] = oUserName.ToString();
+                    }
                 }
             }
             foreach (var user in ret.Users)
@@ -293,15 +419,15 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
 
         var results = request.Filter?.ToLower() switch
         {
-            "apis" or "api" => new AnalyticsReports { Apis = ret.Apis },
+            "apis" => new AnalyticsReports { Apis = ret.Apis },
             "users" => new AnalyticsReports { Users = ret.Users },
             "tags" => new AnalyticsReports { Tags = ret.Tags },
             "status" => new AnalyticsReports { Status = ret.Status },
             "days" => new AnalyticsReports { Days = ret.Days },
             "apikeys" => new AnalyticsReports { ApiKeys = ret.ApiKeys },
-            "ipaddresses" or "ip" => new AnalyticsReports { IpAddresses = ret.IpAddresses },
+            "ips" => new AnalyticsReports { Ips = ret.Ips },
             "browsers" => new AnalyticsReports { Browsers = ret.Browsers, Bots = ret.Bots, Devices = ret.Devices },
-            "durationrange" or "duration" => new AnalyticsReports { DurationRange = ret.DurationRange },
+            "durations" => new AnalyticsReports { Durations = ret.Durations },
             _ => ret,
         };
 
@@ -319,13 +445,8 @@ public class RequestLogsService(IRequestLogger requestLogger) : Service
 
     public async Task<object> Any(GetApiAnalytics request)
     {
-        var feature = AssertPlugin<RequestLogsFeature>();
-        if (!HostContext.DebugMode)
-            await RequiredRoleAttribute.AssertRequiredRoleAsync(Request, feature.AccessRole);
+        var (feature, analytics) = await AssertRequireAnalytics().ConfigAwait();
 
-        if (feature.RequestLogger is not IRequireAnalytics analytics)
-            throw new NotSupportedException(feature.RequestLogger + " does not support IRequireAnalytics");
-        
         if (request.Type == null)
             throw new ArgumentNullException(nameof(request.Type));
         if (request.Value == null)

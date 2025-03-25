@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Extensions.DependencyInjection;
+ using Microsoft.Extensions.DependencyInjection.Extensions;
 using ServiceStack.Admin;
 using ServiceStack.Configuration;
 using ServiceStack.Host;
@@ -160,6 +161,7 @@ public class RequestLogsFeature : IPlugin, Model.IHasStringId, IPreInitPlugin, I
             typeof(AdminGetRoles),
             typeof(GetValidationRules),
             typeof(GetAnalyticsReports),
+            typeof(GetAnalyticsInfo),
             typeof(GetApiAnalytics),
             typeof(NativeTypesBase),
 #if NET6_0_OR_GREATER
@@ -190,7 +192,7 @@ public class RequestLogsFeature : IPlugin, Model.IHasStringId, IPreInitPlugin, I
         var requestLogger = RequestLogger ?? new InMemoryRollingRequestLogger(Capacity);
         RequestLogger ??= requestLogger;
         requestLoggerType = requestLogger.GetType();
-        services.AddSingleton(requestLogger);
+        services.TryAddSingleton(requestLogger);
 
         if (requestLogger is IConfigureServices configureServices)
         {
