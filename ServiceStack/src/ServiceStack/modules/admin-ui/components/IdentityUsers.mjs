@@ -1,7 +1,16 @@
 import { inject, nextTick, onMounted, onUnmounted, ref, computed, watch } from "vue"
-import { useClient, useMetadata } from "@servicestack/vue"
-import { AdminCreateUser, AdminDeleteUser, AdminGetUser, AdminQueryUsers, AdminUsersResponse, AdminUpdateUser, AdminUserResponse, Property } from "dtos"
-import { apiValueFmt, map, mapGet, humanify, ApiResult, toCamelCase, dateFmt } from "@servicestack/client"
+import { useClient, useFiles, useMetadata, useFormatters } from "@servicestack/vue"
+import { AdminCreateUser, AdminDeleteUser, AdminGetUser, AdminQueryUsers, AdminUsersResponse, AdminUpdateUser, AdminUserResponse, Property, GetAnalyticsReports } from "dtos"
+import { apiValueFmt, map, mapGet, humanify, ApiResult, toCamelCase, dateFmt, leftPart } from "@servicestack/client"
+import { 
+    createStatusCodesChart, 
+    createDurationRangesChart, 
+    createRequestsChart, 
+    mapCounts, 
+    sortedDetailRequests, 
+    hiddenApiKey,
+    onClick,
+} from "charts"
 let adminUsersNav = null
 const formClass = 'shadow overflow-hidden sm:rounded-md bg-white max-w-screen-lg'
 const gridClass = 'grid grid-cols-12 gap-6'
@@ -135,7 +144,197 @@ export const NewUser = {
         }
     }
 }
+const Analytics = {
+    template:`
+      <div class="mt-8 pt-4 border-t border-gray-900/10 px-4 sm:px-6">
+        <h2 class="float-left mb-3 text-lg font-medium text-gray-900 dark:text-gray-50" id="SlideOver-title">Analytics</h2>
+        <div>
+          <div class="mb-2 flex flex-wrap justify-center">
+            <template v-for="year in years">
+              <b v-if="year === (routes.year || new Date().getFullYear().toString())" class="ml-3 text-sm font-semibold">
+                {{ year }}
+              </b>
+              <a v-else v-href="{ year }" class="ml-3 text-sm text-indigo-700 font-semibold hover:underline">
+                {{ year }}
+              </a>
+            </template>
+          </div>
+          <div class="mb-4 flex flex-wrap justify-center">
+            <template v-for="month in months.filter(x => x.startsWith(routes.year || new Date().getFullYear().toString()))">
+                <span v-if="month === (routes.month || (new Date().getFullYear() + '-' + (new Date().getMonth() + 1).toString().padStart(2,'0')))" class="mr-2 mb-2 text-xs leading-5 font-semibold bg-indigo-600 text-white rounded-full py-1 px-3 flex items-center space-x-2">
+                  {{ new Date(month + '-01').toLocaleString('default', { month: 'long' }) }}
+                </span>
+              <a v-else v-href="{ month }" class="mr-2 mb-2 text-xs leading-5 font-semibold bg-slate-400/10 rounded-full py-1 px-3 flex items-center space-x-2 hover:bg-slate-400/20 dark:highlight-white/5">
+                {{ new Date(month + '-01').toLocaleString('default', { month: 'short' }) }}
+              </a>
+            </template>
+          </div>
+          
+          <div v-if="analytics">
+            <div class="w-full">
+              <div>
+                <div class="float-right text-sm">
+                  <div>
+                    <span class="pr-2">Total Requests</span>
+                    <span>{{humanifyNumber(analytics.totalRequests)}}</span>
+                  </div>
+                </div>
+                <LogLinks title="User" :links="userLinks" :filter="{ userId:id }" />
+              </div>
+              <div class="mt-4">
+                <HtmlFormat :value="userAnalytics" />
+              </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 w-full gap-2">
+              <div v-if="mapCounts(analytics,'apis')">
+                <h4 class="my-1">Top APIs</h4>
+                <div class="mt-1 bg-white rounded shadow p-4" style="height:300px">
+                  <canvas ref="refUserTopApis"></canvas>
+                </div>
+              </div>
+              <div v-if="mapCounts(analytics,'apiKeys')">
+                <h4 class="my-1">Top API Keys</h4>
+                <div class="bg-white rounded shadow p-4" style="height:300px">
+                  <canvas ref="refUserTopApiKeys"></canvas>
+                </div>
+              </div>
+            </div>
+            <div class="my-4 flex justify-center">
+              <span class="cursor-pointer flex font-medium text-indigo-600 hover:text-indigo-500" 
+                    v-href="{ $page:'analytics', tab:'users', userId:id, $clear:true }">
+                <svg class="mr-2 h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path fill="currentColor" d="M13 5h2v14h-2zm-2 4H9v10h2zm-4 4H5v6h2zm12 0h-2v6h2z"></path></svg>
+                View User Analytics
+              </span>
+            </div>
+          </div>
+          <div v-else class="text-center">
+            User did not make any API requests during this period 
+          </div>
+          
+        </div>
+      </div>
+    `,
+    props: {
+      info: Object,
+      id: String,
+    },
+    setup(props) {
+        const routes = inject('routes')
+        const client = useClient()
+        const api = ref(new ApiResult())
+        const analytics = computed(() =>
+            api.value.response?.result?.users ? Object.values(api.value.response.result.users ?? {} )?.[0] : null)
+        const months = ref(props.info.months ?? [])
+        const years = computed(() =>
+            Array.from(new Set(months.value.map(x => leftPart(x,'-')))).toReversed())
+        const refUserTopApis = ref(null)
+        const refUserTopApiKeys = ref(null)
+        let userTopApisChart = null
+        let userTopApiKeysChart = null
+        const { formatBytes } = useFiles()
+        const { humanifyMs, humanifyNumber } = useFormatters()
+        const numFmt = new Intl.NumberFormat('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        })
+        function round(n) {
+            return n.toString().indexOf(".") === -1 ? n : numFmt.format(n);
+        }
+        const userAnalytics = computed(() => {
+            const user = analytics.value
+            if (user) {
+                let ret = []
+                if (user.totalDuration) {
+                    ret.push({ name: 'Duration',
+                        Total: humanifyMs(round(user.totalDuration)),
+                        Min: humanifyMs(round(user.minDuration)),
+                        Max: humanifyMs(round(user.maxDuration)),
+                    })
+                }
+                if (user.totalRequestLength) {
+                    ret.push({ name: 'Request Body',
+                        Total: formatBytes(user.totalRequestLength),
+                        Min: formatBytes(user.minRequestLength),
+                        Max: formatBytes(user.maxRequestLength),
+                    })
+                }
+                return ret
+            }
+            return []
+        })
+        const userLinks = computed(() => {
+            const user = analytics.value
+            if (user) {
+                let linkBase = `./logging?userId=${routes.userId}`
+                if (routes.month) {
+                    linkBase += `&month=${routes.month}`
+                }
+                const ret = []
+                Object.entries(user.status).forEach(([status, count]) => {
+                    ret.push({ label:status, href:`${linkBase}&status=${status}`, count })
+                })
+                return ret
+            }
+            return []
+        })
+        
+        async function update() {
+            api.value = await client.api(new GetAnalyticsReports({
+                filter: "user",
+                value: props.id,
+                month: routes.month ? `${routes.month}-01` : undefined,
+            }))
+            nextTick(() => {
+                userTopApisChart = createRequestsChart({
+                    requests: sortedDetailRequests(analytics.value?.apis),
+                    chart: userTopApisChart,
+                    refEl: refUserTopApis,
+                    formatY: function(ctx, value, index, values) {
+                        return ctx.labels[index]
+                    },
+                    onClick: onClick(analytics.value, routes, 'api'),
+                })
+                userTopApiKeysChart = createRequestsChart({
+                    requests: sortedDetailRequests(analytics.value?.apiKeys),
+                    chart: userTopApiKeysChart,
+                    refEl: refUserTopApiKeys,
+                    formatY: function(ctx, value, index, values) {
+                        return hiddenApiKey(ctx.labels[index])
+                    },
+                    onClick: onClick(analytics.value, routes, 'apiKey'),
+                })
+            })
+        }
+        
+        onMounted(update)
+        
+        onUnmounted(() => {
+            [
+                userTopApisChart,
+                userTopApiKeysChart,
+            ].forEach(chart => chart?.destroy())
+        })
+        
+        watch(() => [routes.month], update)
+        
+        return {
+            routes, 
+            months,
+            years,
+            analytics,
+            userAnalytics,
+            userLinks,
+            refUserTopApis,
+            refUserTopApiKeys,
+            mapCounts,
+            humanifyNumber,
+        }
+    }
+}
 export const EditUser = {
+    components: {
+        Analytics,
+    },
     template: `
       <SlideOver title="Edit User" @done="close" content-class="relative flex-1">
         <form @submit.prevent="submit" autocomplete="off">
@@ -225,10 +424,12 @@ export const EditUser = {
                 </div>
               </form>
             </div>
-            <div class="mt-8 pt-4 border-t border-gray-900/10 px-4 sm:px-6">
-              <ManageUserApiKeys v-if="store.plugins?.apiKey" :user="request" />
+            <div v-if="store.plugins?.apiKey" class="mt-8 pt-4 border-t border-gray-900/10 px-4 sm:px-6">
+              <ManageUserApiKeys :user="request" />
             </div>
             
+            <Analytics v-if="server.plugins.requestLogs?.analytics && !server.plugins.requestLogs.analytics.disableUserAnalytics" 
+                       :info="server.plugins.requestLogs?.analytics" :id="id" />
           </div>
         </form>
         <template #footer>
@@ -252,9 +453,10 @@ export const EditUser = {
     setup(props, { emit }) {
         const store = inject('store')
         const routes = inject('routes')
+        const server = inject('server')
         const client = useClient()
         const { toFormValues } = useMetadata()
-        const { formLayout, inputIds, exceptFields, init } = createForm(inject('server'))
+        const { formLayout, inputIds, exceptFields, init } = createForm(server)
         const request = ref(init(new AdminUpdateUser({ id:props.id }), dtoProps))
         const model = ref({ newRole:'', newPermission:'', password:'', confirmDelete: false })
         const successMessage = ref('')
@@ -382,6 +584,7 @@ export const EditUser = {
         return {
             store,
             routes,
+            server,
             request,
             exceptFields,
             isDtoProp,

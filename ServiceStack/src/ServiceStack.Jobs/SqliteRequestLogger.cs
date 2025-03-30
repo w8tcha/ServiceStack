@@ -78,7 +78,6 @@ public class SqliteRequestLogsService(IRequestLogger requestLogger, IAutoQueryDb
 public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema, 
     IRequireRegistration, IConfigureServices, IRequireAnalytics
 {
-    private static readonly object dbWrites = Locks.RequestsDb;
     public string DbDir { get; set; } = "App_Data/requests";
     public bool EnableAdmin { get; set; } = true;
     public AutoQueryFeature? AutoQueryFeature { get; set; }
@@ -220,20 +219,24 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
         
         if (log.IsEnabled(LogLevel.Debug))
             log.LogDebug("Saving {Count} Request Log Entries...", logEntries.Count);
-        using var db = OpenMonthDb(DateTime.UtcNow);
+        var now = DateTime.UtcNow;
+        using var db = OpenMonthDb(now);
         while (logEntries.TryDequeue(out var entry))
         {
             try
             {
                 var dbEntry = ToRequestLog(entry);
-                lock (dbWrites)
+                lock (Locks.GetDbLock(DbMonthFile(now)))
                 {
                     db.Insert(dbEntry);
                 }
             }
             catch (Exception e)
             {
-                log.LogError(e, "Error while saving request log entry: {Message}", e.Message);
+                log.LogError("Error while saving request log entry: {Message}", e.Message);
+                // Requeue and wait for next tick
+                logEntries.Enqueue(entry);
+                return;
             }
         }
     }
@@ -284,7 +287,7 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
             var dataSource = AppHost.HostingEnvironment.ContentRootPath.CombineWith(DbDir, monthDb);
             dbFactory.RegisterConnection(monthDb, $"DataSource={dataSource};Cache=Shared", SqliteDialect.Provider);
             var db = dbFactory.OpenDbConnection(monthDb);
-            InitMonthDbSchema(db);
+            InitMonthDbSchema(db, createdDate);
             return db;
         }
         return dbFactory.OpenDbConnection(monthDb);
@@ -292,15 +295,19 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
 
     public IDbConnection OpenMonthDb(DateTime createdDate) => ResolveMonthDb(DbFactory, createdDate);
 
-    public void InitMonthDbSchema(IDbConnection db)
+    public void InitMonthDbSchema(IDbConnection db, DateTime month)
     {
-        db.CreateTableIfNotExists<RequestLog>();
+        lock (Locks.GetDbLock(DbMonthFile(month)))
+        {
+            db.CreateTableIfNotExists<RequestLog>();
+        }
     }
 
     public void InitSchema()
     {
-        using var monthDb = OpenMonthDb(DateTime.UtcNow);
-        InitMonthDbSchema(monthDb);
+        var now = DateTime.UtcNow;
+        using var db = OpenMonthDb(now);
+        InitMonthDbSchema(db, now);
     }
     
     public static RequestLog ToRequestLog(RequestLogEntry from)
@@ -376,42 +383,65 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
     public AnalyticsInfo GetAnalyticInfo(AnalyticsConfig config)
     {
         var monthDbs = ResolveMonthDbs().Map(x => x.Replace('\\','/')); 
-        return new AnalyticsInfo
+        var ret = new AnalyticsInfo
         {
             Months = monthDbs.Map(x => x.LastRightPart('/').RightPart('_').LeftPart('.'))
                 .OrderBy(x => x).ToList()
         };
+
+        try
+        {
+            var sql = 
+                """
+                SELECT
+                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where OperationName IS NOT NULL)) AS 'apis',
+                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where UserAuthId IS NOT NULL)) AS 'users',
+                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where Headers LIKE '%Bearer ak-%')) AS 'apiKeys',
+                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where IpAddress IS NOT NULL)) AS 'ips'
+                """;
+            using var db = OpenMonthDb(DateTime.UtcNow);
+            var result = db.SqlList<(int? apis, int? users, int? apiKeys, bool? ips)>(sql).FirstOrDefault();
+            ret.Tabs = new();
+            if (result.apis == 1)
+                ret.Tabs["APIs"] = "";
+            if (result.users == 1)
+                ret.Tabs["Users"] = "users";
+            if (result.apis == 1)
+                ret.Tabs["API Keys"] = "apiKeys";
+            if (result.apis == 1)
+                ret.Tabs["IP Addresses"] = "ips";
+        }
+        catch (Exception ignore) {}
+        
+        return ret;
     }
 
     public void ClearAnalyticsCaches(DateTime month)
     {
         using var db = OpenMonthDb(month);
-        db.DropTable<AnalyticsReports>();
-    }
-
-    [Flags]
-    enum Detail
-    {
-        None = 0,
-        Apis = 1 << 0,
-        Users = 1 << 1,
-        Status = 1 << 2,
-        ApiKeys = 1 << 3,
-        Ips = 1 << 4,
-        Durations = 1 << 5,
+        lock (Locks.GetDbLock(DbMonthFile(month)))
+        {
+            db.DropTable<AnalyticsReports>();
+        }
     }
     
-    public static string? GetApiKey(RequestLog log, Dictionary<string, string>? headers= null)
+    private static AnalyticsReports CreateAnalyticsReports()
     {
-        if (log.Meta?.TryGetValue("apikey", out var authorization) == true)
-            return authorization;
-        headers ??= new Dictionary<string, string>(log.Headers ?? new(), StringComparer.OrdinalIgnoreCase);
-        if (headers.TryGetValue(HttpHeaders.Authorization, out authorization) 
-            && authorization.StartsWith("Bearer ak-", StringComparison.OrdinalIgnoreCase))
+        var ret = new AnalyticsReports
         {
-            return authorization.RightPart(' ');
-        }
-        return null;
+            Apis = new(),
+            Users = new(),
+            Tags = new(),
+            Status = new(),
+            Days = new(),
+            ApiKeys = new(),
+            Ips = new(),
+            Browsers = new(),
+            Devices = new(),
+            Bots = new(),
+            Durations = new(),
+        };
+        return ret;
     }
 
     public AnalyticsReports GetAnalyticsReports(AnalyticsConfig config, DateTime month)
@@ -437,22 +467,324 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
         
         List<RequestLog> batch = [];
         long lastPk = 0;
-        var metadata = HostContext.Metadata;
-        var ret = new AnalyticsReports
-        {
-            Apis = new(),
-            Users = new(),
-            Tags = new(),
-            Status = new(),
-            Days = new(),
-            ApiKeys = new(),
-            Ips = new(),
-            Browsers = new(),
-            Devices = new(),
-            Bots = new(),
-            Durations = new(),
-        };
+        var ret = CreateAnalyticsReports();
+        
+        do {
+            batch = db.Select(
+                db.From<RequestLog>()
+                    .Where(x => x.Id > lastPk)
+                    .OrderBy(x => x.Id)
+                    .Limit(config.BatchSize));
+            
+            foreach (var requestLog in batch)
+            {
+                ret.AddRequestLog(requestLog, config);
+                lastPk = requestLog.Id;
+            }
+            
+        } while(batch.Count >= config.BatchSize);
 
+        ret.Id = lastPk;
+        ret.CleanResults(config);
+
+        lock (Locks.GetDbLock(DbMonthFile(month)))
+        {
+            db.DropAndCreateTable<AnalyticsReports>();
+            db.Insert(ret);
+        }
+        
+        return ret;
+    }
+
+    public AnalyticsReports GetApiAnalytics(AnalyticsConfig config, DateTime month, string op)
+    {
+        using var db = OpenMonthDb(month);
+
+        var tableExists = db.TableExists<ApiAnalytics>();
+        var lastLogId = tableExists
+            ? db.Single(db.From<RequestLog>()
+                .Where(x => x.OperationName == op)
+                .OrderByDescending(x => x.Id).Limit(1))?.Id
+            : null;
+
+        ApiAnalytics? apiAnalytics = null;
+        try
+        {
+            // Ignore schema changes, table is recreated when cached
+            apiAnalytics = lastLogId != null
+                ? db.SingleById<ApiAnalytics>(lastLogId)
+                : null;
+        } catch (Exception ignore) {}
+
+        if (apiAnalytics?.Report != null)
+            return apiAnalytics.Report;
+        
+        List<RequestLog> batch = [];
+        long lastPk = 0;
+        var ret = CreateAnalyticsReports();
+        
+        do {
+            batch = db.Select(
+                db.From<RequestLog>()
+                    .Where(x => x.Id > lastPk)
+                    .And(x => x.OperationName == op)
+                    .OrderBy(x => x.Id)
+                    .Limit(config.BatchSize));
+            
+            foreach (var requestLog in batch)
+            {
+                ret.AddRequestLog(requestLog, config);
+                lastPk = requestLog.Id;
+            }
+            
+        } while(batch.Count >= config.BatchSize);
+
+        ret.Id = lastPk;
+        ret.CleanResults(config);
+
+        if (ret.Users?.Count > 0)
+        {
+            lock (Locks.GetDbLock(DbMonthFile(month)))
+            {
+                db.CreateTableIfNotExists<ApiAnalytics>();
+                db.Delete<ApiAnalytics>(x => x.Request == op);
+                
+                db.Insert(new ApiAnalytics
+                {
+                    Id =  lastPk,
+                    Request = op,
+                    Created = DateTime.UtcNow,
+                    Version =  Env.ServiceStackVersion,
+                    Report = ret,
+                });
+            }
+        }
+        
+        return ret;
+    }
+
+    public AnalyticsReports GetUserAnalytics(AnalyticsConfig config, DateTime month, string userId)
+    {
+        using var db = OpenMonthDb(month);
+
+        var tableExists = db.TableExists<UserAnalytics>();
+        var lastLogId = tableExists
+            ? db.Single(db.From<RequestLog>()
+                .Where(x => x.UserAuthId == userId)
+                .OrderByDescending(x => x.Id).Limit(1))?.Id
+            : null;
+
+        UserAnalytics? userAnalytics = null;
+        try
+        {
+            // Ignore schema changes, table is recreated when cached
+            userAnalytics = lastLogId != null
+                ? db.SingleById<UserAnalytics>(lastLogId)
+                : null;
+        } catch (Exception ignore) {}
+
+        if (userAnalytics?.Report != null)
+            return userAnalytics.Report;
+        
+        List<RequestLog> batch = [];
+        long lastPk = 0;
+        var ret = CreateAnalyticsReports();
+        
+        do {
+            batch = db.Select(
+                db.From<RequestLog>()
+                    .Where(x => x.Id > lastPk)
+                    .And(x => x.UserAuthId == userId)
+                    .OrderBy(x => x.Id)
+                    .Limit(config.BatchSize));
+            
+            foreach (var requestLog in batch)
+            {
+                ret.AddRequestLog(requestLog, config);
+                lastPk = requestLog.Id;
+            }
+            
+        } while(batch.Count >= config.BatchSize);
+
+        ret.Id = lastPk;
+        ret.CleanResults(config);
+
+        if (ret.Users?.Count > 0)
+        {
+            lock (Locks.GetDbLock(DbMonthFile(month)))
+            {
+                db.CreateTableIfNotExists<UserAnalytics>();
+                db.Delete<UserAnalytics>(x => x.UserId == userId);
+                
+                db.Insert(new UserAnalytics
+                {
+                    Id =  lastPk,
+                    UserId = userId,
+                    Created = DateTime.UtcNow,
+                    Version =  Env.ServiceStackVersion,
+                    Report = ret,
+                });
+            }
+        }
+        
+        return ret;
+    }
+
+    public AnalyticsReports GetApiKeyAnalytics(AnalyticsConfig config, DateTime month, string apiKey)
+    {
+        apiKey.SqlVerifyFragment();
+        
+        using var db = OpenMonthDb(month);
+
+        var tableExists = db.TableExists<ApiKeyAnalytics>();
+        var lastLogId = tableExists
+            ? db.Single(db.From<RequestLog>()
+                .And("Headers LIKE {0}", $"%Bearer {apiKey}%")
+                .OrderByDescending(x => x.Id).Limit(1))?.Id
+            : null;
+
+        ApiKeyAnalytics? apiKeyAnalytics = null;
+        try
+        {
+            // Ignore schema changes, table is recreated when cached
+            apiKeyAnalytics = lastLogId != null
+                ? db.SingleById<ApiKeyAnalytics>(lastLogId)
+                : null;
+        } catch (Exception ignore) {}
+
+        if (apiKeyAnalytics?.Report != null)
+            return apiKeyAnalytics.Report;
+        
+        List<RequestLog> batch = [];
+        long lastPk = 0;
+        var ret = CreateAnalyticsReports();
+        
+        do {
+            batch = db.Select(
+                db.From<RequestLog>()
+                    .Where(x => x.Id > lastPk)
+                    .And("Headers LIKE {0}", $"%Bearer {apiKey}%")
+                    .OrderBy(x => x.Id)
+                    .Limit(config.BatchSize));
+            
+            foreach (var requestLog in batch)
+            {
+                ret.AddRequestLog(requestLog, config);
+                lastPk = requestLog.Id;
+            }
+            
+        } while(batch.Count >= config.BatchSize);
+
+        ret.Id = lastPk;
+        ret.CleanResults(config);
+
+        if (ret.ApiKeys?.Count > 0)
+        {
+            lock (Locks.GetDbLock(DbMonthFile(month)))
+            {
+                db.CreateTableIfNotExists<ApiKeyAnalytics>();
+                db.Delete<ApiKeyAnalytics>(x => x.ApiKey == apiKey);
+                
+                db.Insert(new ApiKeyAnalytics
+                {
+                    Id =  lastPk,
+                    ApiKey = apiKey,
+                    Created = DateTime.UtcNow,
+                    Version =  Env.ServiceStackVersion,
+                    Report = ret,
+                });
+            }
+        }
+        
+        return ret;
+    }
+
+    public AnalyticsReports GetIpAnalytics(AnalyticsConfig config, DateTime month, string ip)
+    {
+        ip.SqlVerifyFragment();
+        
+        using var db = OpenMonthDb(month);
+
+        var tableExists = db.TableExists<IpAnalytics>();
+        var lastLogId = tableExists
+            ? db.Single(db.From<RequestLog>()
+                .And(x => x.IpAddress == ip)
+                .OrderByDescending(x => x.Id).Limit(1))?.Id
+            : null;
+
+        IpAnalytics? apiKeyAnalytics = null;
+        try
+        {
+            // Ignore schema changes, table is recreated when cached
+            apiKeyAnalytics = lastLogId != null
+                ? db.SingleById<IpAnalytics>(lastLogId)
+                : null;
+        } catch (Exception ignore) {}
+
+        if (apiKeyAnalytics?.Report != null)
+            return apiKeyAnalytics.Report;
+        
+        List<RequestLog> batch = [];
+        long lastPk = 0;
+        var ret = CreateAnalyticsReports();
+        
+        do {
+            batch = db.Select(
+                db.From<RequestLog>()
+                    .Where(x => x.Id > lastPk)
+                    .And(x => x.IpAddress == ip)
+                    .OrderBy(x => x.Id)
+                    .Limit(config.BatchSize));
+            
+            foreach (var requestLog in batch)
+            {
+                ret.AddRequestLog(requestLog, config);
+                lastPk = requestLog.Id;
+            }
+            
+        } while(batch.Count >= config.BatchSize);
+
+        ret.Id = lastPk;
+        ret.CleanResults(config);
+
+        if (ret.ApiKeys?.Count > 0)
+        {
+            lock (Locks.GetDbLock(DbMonthFile(month)))
+            {
+                db.CreateTableIfNotExists<IpAnalytics>();
+                db.Delete<IpAnalytics>(x => x.Ip == ip);
+                
+                db.Insert(new IpAnalytics
+                {
+                    Id =  lastPk,
+                    Ip = ip,
+                    Created = DateTime.UtcNow,
+                    Version =  Env.ServiceStackVersion,
+                    Report = ret,
+                });
+            }
+        }
+
+        return ret;
+    }
+}
+
+public static class SqliteRequestLoggerUtils
+{
+    [Flags]
+    enum Detail
+    {
+        None = 0,
+        Apis = 1 << 0,
+        Users = 1 << 1,
+        Status = 1 << 2,
+        ApiKeys = 1 << 3,
+        Ips = 1 << 4,
+        Durations = 1 << 5,
+    }
+    
+    public static void AddRequestLog(this AnalyticsReports ret, RequestLog requestLog, AnalyticsConfig config)
+    {
         void Add(Dictionary<string, RequestSummary> results, string name, RequestLog log)
         {
             var summary = results.TryGetValue(name, out var existing)
@@ -481,15 +813,6 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
                     summary.MaxDuration = duration;
             }
         }
-        void AddSummary(Dictionary<string, RequestSummary> results, string name, RequestSummary apiSummary)
-        {
-            var summary = results.TryGetValue(name, out var existing)
-                ? existing
-                : results[name] = new();
-            summary.TotalRequests += apiSummary.TotalRequests;
-            summary.TotalDuration += apiSummary.TotalDuration;
-            summary.TotalRequestLength += apiSummary.TotalRequestLength;
-        }
 
         void AddDetail(RequestSummary summary, RequestLog log, Dictionary<string,string> headers, Detail details)
         {
@@ -517,7 +840,7 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
             }
             if (details.HasFlag(Detail.ApiKeys))
             {
-                var apiKey = GetApiKey(log, headers);
+                var apiKey = log.GetApiKey(headers);
                 if (apiKey != null)
                 {
                     summary.ApiKeys ??= new();
@@ -562,104 +885,118 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
             }
         }
         
-        do {
-            batch = db.Select(
-                db.From<RequestLog>()
-                    .Where(x => x.Id > lastPk)
-                    .OrderBy(x => x.Id)
-                    .Limit(config.BatchSize));
-            foreach (var requestLog in batch)
+        var headers = new Dictionary<string, string>(requestLog.Headers ?? new(), StringComparer.OrdinalIgnoreCase);
+
+        Add(ret.Apis, requestLog.Request ?? requestLog.OperationName, requestLog);
+        if (requestLog.StatusCode > 0)
+        {
+            var apiLog = ret.Apis.GetValueOrDefault(requestLog.Request ?? requestLog.OperationName);
+            if (apiLog != null)
             {
-                var headers = new Dictionary<string, string>(requestLog.Headers ?? new(), StringComparer.OrdinalIgnoreCase);
-
-                Add(ret.Apis, requestLog.Request ?? requestLog.OperationName, requestLog);
-                if (requestLog.StatusCode > 0)
-                {
-                    var apiLog = ret.Apis.GetValueOrDefault(requestLog.Request ?? requestLog.OperationName);
-                    if (apiLog != null)
-                    {
-                        AddDetail(apiLog, requestLog, headers, Detail.Status | Detail.Users | Detail.ApiKeys | Detail.Ips | Detail.Durations);
-                    }
-                }
-
-                if (requestLog.UserAuthId != null)
-                {
-                    Add(ret.Users, requestLog.UserAuthId, requestLog);
-
-                    var userLog = ret.Users.GetValueOrDefault(requestLog.UserAuthId);
-                    if (userLog != null)
-                    {
-                        if (requestLog.Meta?.TryGetValue("username", out var username) == true)
-                        {
-                            userLog.Name = username;
-                        }
-                        AddDetail(userLog, requestLog, headers, Detail.Status | Detail.Apis | Detail.ApiKeys | Detail.Ips | Detail.Durations);
-                    }
-                }
-
-                if (requestLog.StatusCode > 0)
-                {
-                    Add(ret.Status, requestLog.StatusCode.ToString(), requestLog);
-                }
-
-                Add(ret.Days, requestLog.DateTime.Day.ToString(), requestLog);
-
-                var apiKey = GetApiKey(requestLog, headers);
-                if (apiKey != null)
-                {
-                    Add(ret.ApiKeys, apiKey, requestLog);
-
-                    var apiKeyLog = ret.ApiKeys.GetValueOrDefault(apiKey);
-                    if (apiKeyLog != null)
-                    {
-                        if (requestLog.Meta?.TryGetValue("keyname", out var apiKeyName) == true)
-                        {
-                            apiKeyLog.Name = apiKeyName;
-                        }
-                        AddDetail(apiKeyLog, requestLog, headers, Detail.Status | Detail.Apis | Detail.Users | Detail.Ips | Detail.Durations);
-                    }
-                }
-
-                if (requestLog.IpAddress != null)
-                {
-                    Add(ret.Ips, requestLog.IpAddress, requestLog);
-                    var ipLog = ret.Ips.GetValueOrDefault(requestLog.IpAddress);
-                    if (ipLog != null)
-                    {
-                        AddDetail(ipLog, requestLog, headers, Detail.Status | Detail.Apis | Detail.Users | Detail.ApiKeys | Detail.Durations);
-                    }
-                }
-
-                if (headers.TryGetValue(HttpHeaders.UserAgent, out var userAgent) && !string.IsNullOrEmpty(userAgent))
-                {
-                    if (UserAgentHelper.IsBotUserAgent(userAgent, out var botName))
-                    {
-                        Add(ret.Browsers, "Bot", requestLog);
-                        Add(ret.Bots, botName, requestLog);
-                    }
-                    else
-                    {
-                        var (browser, version) = UserAgentHelper.GetBrowserInfo(userAgent);
-                        Add(ret.Browsers, browser, requestLog);
-                        Add(ret.Devices, UserAgentHelper.GetDeviceType(userAgent), requestLog);
-                    }
-                }
-                else
-                {
-                    Add(ret.Browsers, "None", requestLog);
-                    Add(ret.Devices, "None", requestLog);
-                }
-
-                if (requestLog.StatusCode is >= 200 and < 300)
-                {
-                    AddDurations(ret.Durations, (int)requestLog.RequestDuration.TotalMilliseconds);
-                }
-
-                lastPk = requestLog.Id;
+                AddDetail(apiLog, requestLog, headers, Detail.Status | Detail.Users | Detail.ApiKeys | Detail.Ips | Detail.Durations);
             }
-        } while(batch.Count >= config.BatchSize);
+        }
 
-        ret.Id = lastPk;
+        if (requestLog.UserAuthId != null)
+        {
+            Add(ret.Users, requestLog.UserAuthId, requestLog);
+
+            var userLog = ret.Users.GetValueOrDefault(requestLog.UserAuthId);
+            if (userLog != null)
+            {
+                if (requestLog.Meta?.TryGetValue("username", out var username) == true)
+                {
+                    userLog.Name = username;
+                }
+                AddDetail(userLog, requestLog, headers, Detail.Status | Detail.Apis | Detail.ApiKeys | Detail.Ips | Detail.Durations);
+            }
+        }
+
+        if (requestLog.StatusCode > 0)
+        {
+            Add(ret.Status, requestLog.StatusCode.ToString(), requestLog);
+        }
+
+        Add(ret.Days, requestLog.DateTime.Day.ToString(), requestLog);
+
+        var apiKey = requestLog.GetApiKey(headers);
+        if (apiKey != null)
+        {
+            Add(ret.ApiKeys, apiKey, requestLog);
+
+            var apiKeyLog = ret.ApiKeys.GetValueOrDefault(apiKey);
+            if (apiKeyLog != null)
+            {
+                if (requestLog.Meta?.TryGetValue("keyname", out var apiKeyName) == true)
+                {
+                    apiKeyLog.Name = apiKeyName;
+                }
+                AddDetail(apiKeyLog, requestLog, headers, Detail.Status | Detail.Apis | Detail.Users | Detail.Ips | Detail.Durations);
+            }
+        }
+
+        if (requestLog.IpAddress != null)
+        {
+            Add(ret.Ips, requestLog.IpAddress, requestLog);
+            var ipLog = ret.Ips.GetValueOrDefault(requestLog.IpAddress);
+            if (ipLog != null)
+            {
+                AddDetail(ipLog, requestLog, headers, Detail.Status | Detail.Apis | Detail.Users | Detail.ApiKeys | Detail.Durations);
+            }
+        }
+
+        if (headers.TryGetValue(HttpHeaders.UserAgent, out var userAgent) && !string.IsNullOrEmpty(userAgent))
+        {
+            if (UserAgentHelper.IsBotUserAgent(userAgent, out var botName))
+            {
+                Add(ret.Browsers, "Bot", requestLog);
+                Add(ret.Bots, botName, requestLog);
+            }
+            else
+            {
+                var (browser, version) = UserAgentHelper.GetBrowserInfo(userAgent);
+                Add(ret.Browsers, browser, requestLog);
+                Add(ret.Devices, UserAgentHelper.GetDeviceType(userAgent), requestLog);
+            }
+        }
+        else
+        {
+            Add(ret.Browsers, "None", requestLog);
+            Add(ret.Devices, "None", requestLog);
+        }
+
+        if (requestLog.StatusCode is >= 200 and < 300)
+        {
+            AddDurations(ret.Durations, (int)requestLog.RequestDuration.TotalMilliseconds);
+        }
+    }
+
+    public static string? GetApiKey(this RequestLog log, Dictionary<string, string>? headers= null)
+    {
+        if (log.Meta?.TryGetValue("apikey", out var authorization) == true)
+            return authorization;
+        headers ??= new Dictionary<string, string>(log.Headers ?? new(), StringComparer.OrdinalIgnoreCase);
+        if (headers.TryGetValue(HttpHeaders.Authorization, out authorization) 
+            && authorization.StartsWith("Bearer ak-", StringComparison.OrdinalIgnoreCase))
+        {
+            return authorization.RightPart(' ');
+        }
+        return null;
+    }
+
+    public static void CleanResults(this AnalyticsReports ret, AnalyticsConfig config)
+    {
+        void AddSummary(Dictionary<string, RequestSummary> results, string name, RequestSummary apiSummary)
+        {
+            var summary = results.TryGetValue(name, out var existing)
+                ? existing
+                : results[name] = new();
+            summary.TotalRequests += apiSummary.TotalRequests;
+            summary.TotalDuration += apiSummary.TotalDuration;
+            summary.TotalRequestLength += apiSummary.TotalRequestLength;
+        }
+
+        var metadata = HostContext.Metadata;
         ret.Created = DateTime.UtcNow;
         ret.Version = Env.ServiceStackVersion;
 
@@ -695,7 +1032,7 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
             .Take(take)
             .Select(kv => kv.Key)
             .ToSet();
-            
+        
         void KeepOnly<V>(Dictionary<string, V> results, HashSet<string> keys)
         {
             foreach (var key in results.Keys)
@@ -705,7 +1042,7 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
                 results.Remove(key);
             }
         }
-        
+    
         void Clean(Dictionary<string, RequestSummary> results)
         {
             foreach (var entry in results.Values)
@@ -738,7 +1075,7 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
                 KeepOnly(results, topKeys);
             }
         }
-        
+    
         Clean(ret.Apis);
         Clean(ret.Users);
         Clean(ret.Tags);
@@ -749,58 +1086,5 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
         Clean(ret.Browsers);
         Clean(ret.Devices);
         Clean(ret.Bots);
-        
-        db.DropAndCreateTable<AnalyticsReports>();
-        db.Insert(ret);
-        
-        return ret;
-    }
-
-    public Dictionary<string, long> GetApiAnalytics(AnalyticsConfig config, DateTime month, AnalyticsType type, string value)
-    {
-        using var db = OpenMonthDb(month);
-        List<RequestLog> batch = [];
-        long lastPk = 0;
-
-        var ret = new Dictionary<string, long>();
-
-        do
-        {
-            var q = db.From<RequestLog>()
-                .Where(x => x.Id > lastPk);
-
-            if (type == AnalyticsType.User)
-            {
-                q.And(x => x.UserAuthId == value);
-            }
-            else if (type == AnalyticsType.Day)
-            {
-                var day = value.ToInt();
-                var from = month.WithDay(day).Date;
-                var to = from.AddDays(1);
-                q.And(x => x.DateTime >= from && x.DateTime < to);
-            }
-            else if (type == AnalyticsType.ApiKey)
-            {
-                q.And("Headers LIKE {0}", $"%Bearer {value}%");
-            }
-            else if (type == AnalyticsType.Ips)
-            {
-                q.And(x => x.IpAddress == value);
-            }
-
-            batch = db.Select(q
-                .OrderBy(x => x.Id)
-                .Limit(config.BatchSize));
-            foreach (var requestLog in batch)
-            {
-                var op = requestLog.Request ?? requestLog.OperationName;
-                ret[op] = ret.TryGetValue(op, out var existing)
-                    ? existing + 1
-                    : 1;
-                lastPk = requestLog.Id;
-            }
-        } while(batch.Count >= config.BatchSize);
-        return ret;
     }
 }
