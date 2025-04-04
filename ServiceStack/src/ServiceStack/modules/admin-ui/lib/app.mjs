@@ -238,7 +238,14 @@ let store = {
     /** @param {string|any} id
      *  @return {LinkInfo} */
     adminLink(id) { return server.ui.adminLinks.find(x => x.id === id) },
-    get adminLinks() { return server.ui.adminLinks },
+    get adminLinks() { 
+        const preferredOrder = server.ui.adminLinksOrder || []
+        const adminLinksSorted = preferredOrder.map(id => {
+            return server.ui.adminLinks.find(link => link.id === id)
+        }).filter(link => link !== undefined)
+        const adminLinksUnsorted = server.ui.adminLinks.filter(link => !preferredOrder.includes(link.id))
+        return [...adminLinksSorted, ...adminLinksUnsorted]
+    },
     get link() { return this.adminLink(routes.admin) },
     /** @param {string} url
      *  @return {Promise<any>} */
@@ -284,7 +291,10 @@ let store = {
     },
     get authRoles() { return this.auth && this.auth.roles || [] },
     get authPermissions() { return this.auth && this.auth.permissions || [] },
-    get authProfileUrl() { return this.auth && this.auth.profileUrl },
+    get defaultUserUri() { return 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48cGF0aCBmaWxsPSIjNGE1NTY1IiBkPSJNMTYgOGE1IDUgMCAxIDAgNSA1YTUgNSAwIDAgMC01LTUiLz48cGF0aCBmaWxsPSIjNGE1NTY1IiBkPSJNMTYgMmExNCAxNCAwIDEgMCAxNCAxNEExNC4wMTYgMTQuMDE2IDAgMCAwIDE2IDJtNy45OTMgMjIuOTI2QTUgNSAwIDAgMCAxOSAyMGgtNmE1IDUgMCAwIDAtNC45OTIgNC45MjZhMTIgMTIgMCAxIDEgMTUuOTg1IDAiLz48L3N2Zz4=' },
+    get userIconUri() { return server.ui.userIcon?.uri || this.defaultUserUri },
+    get authProfileUrl() { return this.auth && this.auth.profileUrl || this.userIconUri },
+    
     get isAdmin() { return this.authRoles.indexOf('Admin') >= 0 },
     /** @return {LinkInfo[]} */
     get authLinks() {
