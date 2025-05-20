@@ -6,9 +6,9 @@ using System.Text.Json;
 
 namespace ServiceStack.Text;
 
-public class SystemJsonUtils
+public static class SystemJsonUtils
 {
-    public static object? AsObject(JsonElement element)
+    public static object? AsObject(this JsonElement element)
     {
         switch (element.ValueKind)
         {
@@ -22,12 +22,15 @@ public class SystemJsonUtils
                     return longValue;
                 if (element.TryGetDouble(out double doubleValue))
                     return doubleValue;
+                if (element.TryGetDecimal(out decimal decimalValue))
+                    return decimalValue;
                 return element.GetRawText(); // Fallback
             case JsonValueKind.True:
                 return true;
             case JsonValueKind.False:
                 return false;
             case JsonValueKind.Null:
+            case JsonValueKind.Undefined:
                 return null;
             case JsonValueKind.Object:
                 // For objects, create a Dictionary

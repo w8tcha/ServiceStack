@@ -43,7 +43,7 @@ const SidebarTop = {
     <div>
       <Brand class="pl-4 pb-3" :icon="server.ui.brandIcon" :name="server.app.serviceName" />
       <div class="bg-white py-1.5 px-3.5">
-        <svg class="absolute ml-2.5 mt-2.5 h-4 w-4 text-gray-500" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+        <svg class="absolute ml-2.5 mt-2 h-4 w-4 text-gray-500" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
           <path d="M16.32 14.9l5.39 5.4a1 1 0 0 1-1.42 1.4l-5.38-5.38a8 8 0 1 1 1.41-1.41zM10 16a6 6 0 1 0 0-12 6 6 0 0 0 0 12z"/>
         </svg>
         <input type="search" v-model="store.filter" placeholder="Filter..."
@@ -63,7 +63,7 @@ export const Sidebar = {
     template:/*html*/`
     <div id="sidebar" class="fixed inset-0 flex z-40 md:hidden" role="dialog" aria-modal="true">
         <!---: Off-canvas menu overlay, show/hide based on off-canvas menu state. -->
-        <div :class="['fixed inset-0 bg-gray-600 bg-opacity-75', transition1]" aria-hidden="true"></div>
+        <div :class="['fixed inset-0 bg-gray-600/75', transition1]" aria-hidden="true"></div>
     
         <!---: Off-canvas menu, show/hide based on off-canvas menu state. -->
         <div :class="['relative flex-1 flex flex-col max-w-sidebar w-full bg-white', transition2]">

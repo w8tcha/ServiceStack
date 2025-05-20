@@ -14,7 +14,7 @@ public static class CssDefaults
         public const string GridClass = "mt-4 flex flex-col";
         public const string Grid2Class = "-my-2 -mx-4 overflow-x-auto sm:-mx-6 lg:-mx-8";
         public const string Grid3Class = "inline-block min-w-full py-2 align-middle md:px-6 lg:px-8";
-        public const string Grid4Class = "overflow-hidden shadow ring-1 ring-black ring-opacity-5 md:rounded-lg";
+        public const string Grid4Class = "overflow-hidden shadow ring-1 ring-black/5 md:rounded-lg";
                                          
         public const string TableClass = "min-w-full divide-y divide-gray-200 dark:divide-gray-700";
 
@@ -38,7 +38,7 @@ public static class CssDefaults
         public static string GetGrid4Class(TableStyle style = DefaultTableStyle) => style.HasFlag(TableStyle.WhiteBackground)
             ? ""
             : style.HasFlag(TableStyle.FullWidth)
-                ? "overflow-hidden shadow-sm ring-1 ring-black ring-opacity-5"
+                ? "overflow-hidden shadow-sm ring-1 ring-black/5"
                 : Grid4Class;
 
         public static string GetTableClass(TableStyle style = DefaultTableStyle) => style.HasFlag(TableStyle.FullWidth) || style.HasFlag(TableStyle.VerticalLines)
@@ -78,7 +78,7 @@ public static class CssDefaults
         public static string GetFormClass(FormStyle style = FormStyle.SlideOver) => style == FormStyle.Card ? Card.FormClass : SlideOver.FormClass;
         public static string GetHeadingClass(FormStyle style = FormStyle.SlideOver) => style == FormStyle.Card ? Card.HeadingClass : SlideOver.HeadingClass;
         public static string GetSubHeadingClass(FormStyle style = FormStyle.SlideOver) => style == FormStyle.Card ? Card.SubHeadingClass : SlideOver.SubHeadingClass;
-        public const string ButtonsClass = "mt-4 px-4 py-3 bg-gray-50 dark:bg-gray-900 sm:px-6 flex flex-wrap justify-between";
+        public const string ButtonsClass = "px-4 py-3 bg-gray-50 dark:bg-gray-900 sm:px-6 flex flex-wrap justify-between";
         public const string LegendClass = "text-base font-medium text-gray-900 dark:text-gray-100 text-center mb-4";
 
         public static class SlideOver
@@ -88,7 +88,7 @@ public static class CssDefaults
             public const string TitlebarClass = "bg-gray-50 dark:bg-gray-900 px-4 py-6 sm:px-6";
             public const string HeadingClass = "text-lg font-medium text-gray-900 dark:text-gray-100";
             public const string SubHeadingClass = "mt-1 text-sm text-gray-500 dark:text-gray-400";
-            public const string CloseButtonClass = "rounded-md bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:ring-offset-black";
+            public const string CloseButtonClass = "cursor-pointer rounded-md bg-gray-50 dark:bg-gray-900 text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:ring-offset-black";
 
             public static DataTransition SlideOverTransition = new DataTransition(
                 entering: new(@class: "transform transition ease-in-out duration-500 sm:duration-700", from: "translate-x-full", to: "translate-x-0"),
@@ -118,7 +118,7 @@ public static class CssDefaults
         public const string FormClass = "flex h-full flex-col divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-black shadow-xl";
         public const string TitlebarClass = "bg-gray-50 dark:bg-gray-900 p-3 sm:p-6";
         public const string HeadingClass = "text-lg font-medium text-gray-900 dark:text-gray-50";
-        public const string CloseButtonClass = "rounded-md bg-gray-50 dark:bg-black text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:ring-offset-black";
+        public const string CloseButtonClass = "cursor-pointer rounded-md bg-gray-50 dark:bg-black text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:ring-offset-black";
 
         public const string TransitionClass = "transform transition ease-in-out duration-500 sm:duration-700";
     }
@@ -195,7 +195,7 @@ public static class SelectInput
     public static string ErrorClasses { get; set; } = TextInput.ErrorClasses;
     public static string LabelClasses { get; set; } = TextInput.LabelClasses;
     public static string InputBaseClasses { get; set; } = "mt-1 block w-full pl-3 pr-10 py-2 text-base focus:outline-none border-gray-300 sm:text-sm rounded-md dark:text-white dark:bg-gray-900 dark:border-gray-600 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:shadow-none";
-    public static string InputValidClasses { get; set; } = "text-gray-900 focus:ring-indigo-500 focus:border-indigo-500";
+    public static string InputValidClasses { get; set; } = "shadow-sm text-gray-900 focus:ring-indigo-500 focus:border-indigo-500";
     public static string InputInvalidClasses { get; set; } = "text-red-900 focus:ring-red-500 focus:border-red-500";
     public static string InputClasses { get; set; } = InputBaseClasses + " " + InputValidClasses;
 }

@@ -184,7 +184,7 @@ export const Redis = {
 <div v-else-if="routes.tab === 'search'">
   <div class="relative my-4">
     <div class="bg-white py-1.5 px-3.5">
-      <svg class="absolute ml-2.5 mt-2.5 h-4 w-4 text-gray-500" fill="currentColor" xmlns="http://www.w3.org/2000/svg"
+      <svg class="absolute ml-2.5 mt-2 h-4 w-4 text-gray-500" fill="currentColor" xmlns="http://www.w3.org/2000/svg"
            viewBox="0 0 24 24">
         <path
             d="M16.32 14.9l5.39 5.4a1 1 0 0 1-1.42 1.4l-5.38-5.38a8 8 0 1 1 1.41-1.41zM10 16a6 6 0 1 0 0-12 6 6 0 0 0 0 12z"></path>
@@ -407,7 +407,7 @@ export const Redis = {
             </svg>
           </OutlineButton>
         </div>
-        <div :class="['origin-top-right absolute left-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 focus:outline-none',transition1]"
+        <div :class="['origin-top-right absolute left-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black/5 focus:outline-none',transition1]"
              :style="{ display: showNew ? 'block' : 'none' }"
              role="menu" aria-orientation="vertical" aria-labelledby="menu-button" tabindex="-1">
           <div class="py-1" role="none">
