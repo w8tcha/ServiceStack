@@ -49,13 +49,13 @@ public abstract class SqliteOrmLiteDialectProviderBase : OrmLiteDialectProviderB
     /// </summary>
     public bool EnableWal
     {
-        get => ConnectionCommands.Contains(SqlitePragmas.EnableForeignKeys);
+        get => OneTimeConnectionCommands.Contains(SqlitePragmas.JournalModeWal);
         set
         {
             if (value)
-                ConnectionCommands.AddIfNotExists(SqlitePragmas.EnableForeignKeys);
+                OneTimeConnectionCommands.AddIfNotExists(SqlitePragmas.JournalModeWal);
             else
-                ConnectionCommands.Remove(SqlitePragmas.DisableForeignKeys);
+                OneTimeConnectionCommands.Remove(SqlitePragmas.JournalModeWal);
         }
     }
 
@@ -64,13 +64,25 @@ public abstract class SqliteOrmLiteDialectProviderBase : OrmLiteDialectProviderB
     /// </summary>
     public bool EnableForeignKeys
     {
-        get => ConnectionCommands.Contains(SqlitePragmas.EnableForeignKeys);
+        get => OneTimeConnectionCommands.Contains(SqlitePragmas.EnableForeignKeys);
         set
         {
             if (value)
-                ConnectionCommands.AddIfNotExists(SqlitePragmas.EnableForeignKeys);
+                OneTimeConnectionCommands.AddIfNotExists(SqlitePragmas.EnableForeignKeys);
             else
-                ConnectionCommands.Remove(SqlitePragmas.DisableForeignKeys);
+                OneTimeConnectionCommands.Remove(SqlitePragmas.DisableForeignKeys);
+        }
+    }
+
+    /// <summary>
+    /// PRAGMA busy_timeout
+    /// </summary>
+    public TimeSpan BusyTimeout
+    {
+        set
+        {
+            ConnectionCommands.RemoveAll(x => x.StartsWith("PRAGMA busy_timeout"));
+            ConnectionCommands.Add(SqlitePragmas.BusyTimeout(value));
         }
     }
 
@@ -374,6 +386,7 @@ public static class SqlitePragmas
     public const string JournalModeWal = "PRAGMA journal_mode=WAL;";
     public const string EnableForeignKeys = "PRAGMA foreign_keys=ON;";
     public const string DisableForeignKeys = "PRAGMA foreign_keys=OFF;";
+    public static string BusyTimeout(TimeSpan timeout) => $"PRAGMA busy_timeout={(int)timeout.TotalMilliseconds};";
 }
 
 public static class SqliteExtensions

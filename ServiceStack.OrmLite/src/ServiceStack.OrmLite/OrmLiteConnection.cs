@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ServiceStack.Data;
 using ServiceStack.Logging;
+using ServiceStack.Model;
 using ServiceStack.Text;
 
 namespace ServiceStack.OrmLite;
@@ -14,9 +15,10 @@ namespace ServiceStack.OrmLite;
 /// Wrapper IDbConnection class to allow for connection sharing, mocking, etc.
 /// </summary>
 public class OrmLiteConnection
-    : IDbConnection, IHasDbConnection, IHasDbTransaction, ISetDbTransaction, IHasDialectProvider
+    : IDbConnection, IHasDbConnection, IHasDbTransaction, ISetDbTransaction, IHasDialectProvider, IHasName
 {
     public readonly OrmLiteConnectionFactory Factory;
+    public string? Name { get; set; }
     public IDbTransaction? Transaction { get; set; }
     public IDbTransaction? DbTransaction => Transaction;
     private IDbConnection? dbConnection;
@@ -24,6 +26,7 @@ public class OrmLiteConnection
     public IOrmLiteDialectProvider DialectProvider { get; set; }
     public string? LastCommandText { get; set; }
     public IDbCommand? LastCommand { get; set; }
+    public string? NamedConnection { get; set; }
 
     /// <summary>
     /// Gets or sets the wait time before terminating the attempt to execute a command and generating an error(in seconds).
@@ -64,6 +67,7 @@ public class OrmLiteConnection
 
         try
         {
+            DialectProvider.OnDisposeConnection?.Invoke(this);
             dbConnection?.Dispose();
         }
         catch (Exception e)
@@ -103,6 +107,7 @@ public class OrmLiteConnection
         Exception? e = null;
         try
         {
+            DialectProvider.OnDisposeConnection?.Invoke(this);
             dbConnection.Close();
         }
         catch (Exception ex)

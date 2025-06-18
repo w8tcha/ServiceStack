@@ -9,6 +9,7 @@ namespace ServiceStack.OrmLite;
 public class OrmLiteCommand : IDbCommand, IHasDbCommand, IHasDialectProvider
 {
     private readonly OrmLiteConnection dbConn;
+    public OrmLiteConnection OrmLiteConnection => dbConn;
     private readonly IDbCommand dbCmd;
     public IOrmLiteDialectProvider DialectProvider { get; set; }
     public bool IsDisposed { get; private set; }
@@ -48,10 +49,14 @@ public class OrmLiteCommand : IDbCommand, IHasDbCommand, IHasDialectProvider
         var writeLock = dbConn.WriteLock;
         if (writeLock != null)
         {
+            DialectProvider.OnBeforeWriteLock?.Invoke(this);
+            int ret;
             lock (writeLock)
             {
-                return dbCmd.ExecuteNonQuery();
+                ret = dbCmd.ExecuteNonQuery();
             }
+            DialectProvider.OnAfterWriteLock?.Invoke(this);
+            return ret;
         }
         return dbCmd.ExecuteNonQuery();
     }

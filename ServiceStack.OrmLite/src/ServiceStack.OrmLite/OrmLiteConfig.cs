@@ -106,6 +106,15 @@ public static class OrmLiteConfig
         }
     }
 
+    public static IDbConnection WithName(this IDbConnection db, string name)
+    {
+        if (db is OrmLiteConnection ormLiteConn)
+        {
+            ormLiteConn.Name = name;
+        }
+        return db;
+    }
+
     private const string RequiresOrmLiteConnection = "{0} can only be set on a OrmLiteConnectionFactory connection, not a plain IDbConnection";
 
     /// <summary>
