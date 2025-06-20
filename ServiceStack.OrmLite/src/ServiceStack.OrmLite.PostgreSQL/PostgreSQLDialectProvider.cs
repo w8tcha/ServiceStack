@@ -243,7 +243,7 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
         }
 
         var sql = StringBuilderCache.Allocate();
-        sql.AppendFormat("{0} {1}", GetQuotedColumnName(fieldDef.FieldName), fieldDefinition);
+        sql.AppendFormat("{0} {1}", GetQuotedColumnName(fieldDef), fieldDefinition);
 
         if (fieldDef.IsPrimaryKey)
         {
@@ -307,7 +307,7 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
         var modelDef = ModelDefinition<T>.Definition;
 
         var sb = StringBuilderCache.Allocate()
-            .Append($"COPY {GetTableName(modelDef)} (");
+            .Append($"COPY {GetQuotedTableName(modelDef)} (");
             
         var fieldDefs = GetInsertFieldDefinitions(modelDef, insertFields:config.InsertFields);
         var i = 0;
@@ -319,7 +319,7 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
             if (i++ > 0)
                 sb.Append(",");
 
-            sb.Append(NamingStrategy.GetColumnName(fieldDef.FieldName));
+            sb.Append(GetQuotedColumnName(fieldDef));
         }
         sb.Append(") FROM STDIN (FORMAT BINARY)");
 
@@ -339,6 +339,10 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
                     : fieldDef.GetValue(obj);
 
                 var converter = GetConverterBestMatch(fieldDef);
+                if (converter == null)
+                {
+                    throw new NotSupportedException($"No converter found for {fieldDef.FieldType.Name}");
+                }
                 var dbValue = converter.ToDbValue(fieldDef.FieldType, value);
                 if (dbValue is float f)
                     dbValue = (double)f;
@@ -374,6 +378,16 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
         var converter = GetConverterBestMatch(fieldDef);
 
         var columnDef = fieldDef.CustomFieldDefinition ?? converter.ColumnDefinition;
+        var dbType = converter.DbType;
+        if (converter is EnumConverter)
+        {
+            dbType = fieldDef.TreatAsType == typeof(int)
+                ? DbType.Int32
+                : fieldDef.TreatAsType == typeof(long)
+                    ? DbType.Int64
+                    : DbType.String;
+        }
+        
         return columnDef switch
         {
             "json" => NpgsqlDbType.Json,
@@ -388,7 +402,7 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
             "double numeric[]" => NpgsqlDbType.Array | NpgsqlDbType.Numeric,
             "timestamp[]" => NpgsqlDbType.Array | NpgsqlDbType.Timestamp,
             "timestamp with time zone[]" => NpgsqlDbType.Array | NpgsqlDbType.TimestampTz,
-            _ => converter.DbType switch
+            _ => dbType switch
             {
                 DbType.Boolean => NpgsqlDbType.Boolean,
                 DbType.SByte => NpgsqlDbType.Smallint,
@@ -447,7 +461,7 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
             if (ShouldReturnOnInsert(modelDef, fieldDef))
             {
                 sbReturningColumns.Append(sbReturningColumns.Length == 0 ? " RETURNING " : ",");
-                sbReturningColumns.Append(GetQuotedColumnName(fieldDef.FieldName));
+                sbReturningColumns.Append(GetQuotedColumnName(fieldDef));
             }
 
             if ((ShouldSkipInsert(fieldDef) && !fieldDef.AutoId)
@@ -461,7 +475,7 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
 
             try
             {
-                sbColumnNames.Append(GetQuotedColumnName(fieldDef.FieldName));
+                sbColumnNames.Append(GetQuotedColumnName(fieldDef));
 
                 sbColumnValues.Append(this.GetParam(SanitizeFieldNameForParamName(fieldDef.FieldName),fieldDef.CustomInsert));
                 AddParameter(cmd, fieldDef);
@@ -479,7 +493,7 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
                 continue;
 
             sbReturningColumns.Append(sbReturningColumns.Length == 0 ? " RETURNING " : ",");
-            sbReturningColumns.Append(GetQuotedColumnName(fieldDef.FieldName));
+            sbReturningColumns.Append(GetQuotedColumnName(fieldDef));
         }
 
         var strReturning = StringBuilderCacheAlt.ReturnAndFree(sbReturningColumns);
@@ -506,7 +520,7 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
     {
         var columnName = fieldDef.IsRowVersion
             ? RowVersionFieldComparer
-            : GetQuotedColumnName(fieldDef.FieldName);
+            : GetQuotedColumnName(fieldDef);
             
         sqlFilter
             .Append(columnName)
@@ -890,7 +904,7 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
     {
         //var column = GetColumnDefinition(fieldDef);
         var columnType = GetColumnTypeDefinition(fieldDef.ColumnType, fieldDef.FieldLength, fieldDef.Scale);
-        var newColumnName = NamingStrategy.GetColumnName(fieldDef.FieldName);
+        var newColumnName = GetColumnName(fieldDef);
 
         var sql = $"ALTER TABLE {GetQuotedTableName(table, schema)} " +
                   $"ALTER COLUMN {GetQuotedColumnName(oldColumn)} TYPE {columnType}";
@@ -898,6 +912,18 @@ public class PostgreSqlDialectProvider : OrmLiteDialectProviderBase<PostgreSqlDi
             ? $", RENAME COLUMN {GetQuotedColumnName(oldColumn)} TO {GetQuotedColumnName(newColumnName)};"
             : ";";
         return sql;
+    }
+    
+    public override string ToResetSequenceStatement(Type tableType, string columnName, int value)
+    {
+        base.ToResetSequenceStatement(tableType, columnName, value);
+        var modelDef = GetModel(tableType);
+        var fieldDef = modelDef.GetFieldDefinition(columnName);
+        // Table needs to be quoted but not column
+        var useTable = GetQuotedTableName(modelDef);
+        var useColumn = fieldDef != null ? GetColumnName(fieldDef) : columnName;
+        
+        return $"SELECT setval(pg_get_serial_sequence('{useTable}', '{useColumn}'), {value}, false);";
     }
 
     public override string SqlConflict(string sql, string conflictResolution)

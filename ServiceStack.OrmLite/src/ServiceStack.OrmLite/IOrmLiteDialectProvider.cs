@@ -133,6 +133,7 @@ public interface IOrmLiteDialectProvider
     string GetQuotedTableName(string tableName, string schema, bool useStrategy);
 
     string GetQuotedColumnName(string columnName);
+    string GetQuotedColumnName(FieldDefinition fieldDef);
 
     string GetQuotedName(string name);
     string GetQuotedName(string name, string schema);
@@ -225,6 +226,7 @@ public interface IOrmLiteDialectProvider
     List<string> ToCreateIndexStatements(Type tableType);
     List<string> ToCreateSequenceStatements(Type tableType);
     string ToCreateSequenceStatement(Type tableType, string sequenceName);
+    string ToResetSequenceStatement(Type tableType, string columnName, int value);
 
     string ToCreateSavePoint(string name);
     string ToReleaseSavePoint(string name);

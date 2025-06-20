@@ -389,11 +389,30 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
 
     public virtual string GetTableName(Type modelType) => GetTableName(modelType.GetModelDefinition());
 
-    public virtual string GetTableName(ModelDefinition modelDef) => 
-        GetTableName(modelDef.ModelName, modelDef.Schema, useStrategy:true);
+    public virtual string GetTableName(ModelDefinition modelDef) => modelDef.Alias != null
+        ? GetTableAlias(modelDef.Alias, modelDef.Schema, useStrategy:true)
+        : GetTableName(modelDef.Name, modelDef.Schema, useStrategy:true);
 
-    public virtual string GetTableName(ModelDefinition modelDef, bool useStrategy) => 
-        GetTableName(modelDef.ModelName, modelDef.Schema, useStrategy);
+    public virtual string GetTableAlias(string alias, string schema, bool useStrategy)
+    {
+        if (useStrategy)
+        {
+            return schema != null
+                ? $"{QuoteIfRequired(NamingStrategy.GetSchemaName(schema))}.{QuoteIfRequired(NamingStrategy.GetAlias(alias))}"
+                : QuoteIfRequired(NamingStrategy.GetAlias(alias));
+        }
+            
+        return schema != null
+            ? $"{QuoteIfRequired(schema)}.{QuoteIfRequired(alias)}"
+            : QuoteIfRequired(alias);
+    }
+
+    public virtual string GetTableName(ModelDefinition modelDef, bool useStrategy) => modelDef.Alias != null 
+        ? GetTableAlias(modelDef.Alias, modelDef.Schema, useStrategy)
+        : GetTableName(modelDef.Name, modelDef.Schema, useStrategy);
+
+    public virtual string GetTableAlias(string alias, string schema = null) =>
+        GetTableAlias(alias, schema, useStrategy: true);
 
     public virtual string GetTableName(string table, string schema = null) =>
         GetTableName(table, schema, useStrategy: true);
@@ -416,7 +435,20 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
         
     public virtual string GetQuotedTableName(ModelDefinition modelDef)
     {
-        return GetQuotedTableName(modelDef.ModelName, modelDef.Schema);
+        return modelDef.Alias != null
+            ? GetQuotedTableAlias(modelDef.Alias, modelDef.Schema)
+            : GetQuotedTableName(modelDef.Name, modelDef.Schema);
+    }
+
+    public virtual string GetQuotedTableAlias(string alias, string schema = null)
+    {
+        if (schema == null)
+            return GetQuotedName(NamingStrategy.GetAlias(alias));
+
+        var escapedSchema = NamingStrategy.GetSchemaName(schema)
+            .Replace(".", "\".\"");
+
+        return $"{GetQuotedName(escapedSchema)}.{GetQuotedName(NamingStrategy.GetAlias(alias))}";
     }
 
     public virtual string GetQuotedTableName(string tableName, string schema = null)
@@ -433,9 +465,23 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
     public virtual string GetQuotedTableName(string tableName, string schema, bool useStrategy) => 
         GetQuotedName(GetTableName(tableName, schema, useStrategy));
 
+    public virtual string GetQuotedColumnName(FieldDefinition fieldDef)
+    {
+        return GetQuotedName(fieldDef.Alias != null 
+            ? NamingStrategy.GetAlias(fieldDef.Alias)
+            : GetQuotedColumnName(fieldDef.Name));
+    }
+    
     public virtual string GetQuotedColumnName(string columnName)
     {
         return GetQuotedName(NamingStrategy.GetColumnName(columnName));
+    }
+
+    public virtual string GetColumnName(FieldDefinition fieldDef)
+    {
+        return fieldDef.Alias != null
+            ? NamingStrategy.GetAlias(fieldDef.Alias)
+            : NamingStrategy.GetColumnName(fieldDef.Name);
     }
 
     public virtual bool ShouldQuote(string name) => !string.IsNullOrEmpty(name) && 
@@ -469,7 +515,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
                               GetColumnTypeDefinition(fieldDef.ColumnType, fieldDef.FieldLength, fieldDef.Scale);
 
         var sql = StringBuilderCache.Allocate();
-        sql.Append($"{GetQuotedColumnName(fieldDef.FieldName)} {fieldDefinition}");
+        sql.Append($"{GetQuotedColumnName(fieldDef)} {fieldDefinition}");
 
         if (fieldDef.IsPrimaryKey)
         {
@@ -724,7 +770,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
             if (sbColumnNames.Length > 0)
                 sbColumnNames.Append(",");
 
-            sbColumnNames.Append(GetQuotedColumnName(fieldDef.FieldName));
+            sbColumnNames.Append(GetQuotedColumnName(fieldDef));
 
             if (sbColumnValues.Length > 0)
                 sbColumnValues.Append(",");
@@ -754,7 +800,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
             if (i++ > 0)
                 sb.Append(",");
 
-            sb.Append(GetQuotedColumnName(fieldDef.FieldName));
+            sb.Append(GetQuotedColumnName(fieldDef));
         }
         sb.Append(") VALUES");
 
@@ -815,7 +861,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
 
             try
             {
-                sbColumnNames.Append(GetQuotedColumnName(fieldDef.FieldName));
+                sbColumnNames.Append(GetQuotedColumnName(fieldDef));
                 sbColumnValues.Append(this.GetParam(SanitizeFieldNameForParamName(fieldDef.FieldName)));
 
                 AddParameter(cmd, fieldDef);
@@ -878,7 +924,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
 
             try
             {
-                sbColumnNames.Append(GetQuotedColumnName(fieldDef.FieldName));
+                sbColumnNames.Append(GetQuotedColumnName(fieldDef));
                 sbColumnValues.Append(this.GetParam(SanitizeFieldNameForParamName(fieldDef.FieldName),fieldDef.CustomInsert));
 
                 var p = AddParameter(cmd, fieldDef);
@@ -922,7 +968,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
 
             try
             {
-                sbColumnNames.Append(GetQuotedColumnName(fieldDef.FieldName));
+                sbColumnNames.Append(GetQuotedColumnName(fieldDef));
                 sbColumnValues.Append(this.GetInsertParam(dbCmd, value, fieldDef));
             }
             catch (Exception ex)
@@ -1063,7 +1109,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
                     sql.Append(", ");
 
                 sql
-                    .Append(GetQuotedColumnName(fieldDef.FieldName))
+                    .Append(GetQuotedColumnName(fieldDef))
                     .Append("=")
                     .Append(this.GetParam(SanitizeFieldNameForParamName(fieldDef.FieldName), fieldDef.CustomUpdate));
 
@@ -1094,14 +1140,14 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
     public virtual void AppendNullFieldCondition(StringBuilder sqlFilter, FieldDefinition fieldDef)
     {
         sqlFilter
-            .Append(GetQuotedColumnName(fieldDef.FieldName))
+            .Append(GetQuotedColumnName(fieldDef))
             .Append(" IS NULL");
     }
 
     public virtual void AppendFieldCondition(StringBuilder sqlFilter, FieldDefinition fieldDef, IDbCommand cmd)
     {
         sqlFilter
-            .Append(GetQuotedColumnName(fieldDef.FieldName))
+            .Append(GetQuotedColumnName(fieldDef))
             .Append("=")
             .Append(this.GetParam(SanitizeFieldNameForParamName(fieldDef.FieldName)));
 
@@ -1337,7 +1383,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
                         sqlFilter.Append(" AND ");
 
                     sqlFilter
-                        .Append(GetQuotedColumnName(fieldDef.FieldName))
+                        .Append(GetQuotedColumnName(fieldDef))
                         .Append("=")
                         .Append(this.AddQueryParam(dbCmd, fieldDef.GetValue(objWithProperties), fieldDef).ParameterName);
 
@@ -1351,7 +1397,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
                     sql.Append(", ");
 
                 sql
-                    .Append(GetQuotedColumnName(fieldDef.FieldName))
+                    .Append(GetQuotedColumnName(fieldDef))
                     .Append("=")
                     .Append(this.GetUpdateParam(dbCmd, fieldDef.GetValue(objWithProperties), fieldDef));
             }
@@ -1390,7 +1436,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
                     sql.Append(", ");
 
                 sql
-                    .Append(GetQuotedColumnName(fieldDef.FieldName))
+                    .Append(GetQuotedColumnName(fieldDef))
                     .Append("=")
                     .Append(this.GetUpdateParam(dbCmd, value, fieldDef));
             }
@@ -1428,7 +1474,7 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
                 if (sql.Length > 0)
                     sql.Append(", ");
 
-                var quotedFieldName = GetQuotedColumnName(fieldDef.FieldName);
+                var quotedFieldName = GetQuotedColumnName(fieldDef);
 
                 if (fieldDef.FieldType.IsNumericType())
                 {
@@ -1576,8 +1622,8 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
             var refModelDef = fieldDef.ForeignKey.ReferenceType.GetModelDefinition();
             sbConstraints.Append(
                 $", \n\n  CONSTRAINT {GetQuotedName(fieldDef.ForeignKey.GetForeignKeyName(modelDef, refModelDef, NamingStrategy, fieldDef))} " +
-                $"FOREIGN KEY ({GetQuotedColumnName(fieldDef.FieldName)}) " +
-                $"REFERENCES {GetQuotedTableName(refModelDef)} ({GetQuotedColumnName(refModelDef.PrimaryKey.FieldName)})");
+                $"FOREIGN KEY ({GetQuotedColumnName(fieldDef)}) " +
+                $"REFERENCES {GetQuotedTableName(refModelDef)} ({GetQuotedColumnName(refModelDef.PrimaryKey)})");
 
             sbConstraints.Append(GetForeignKeyOnDeleteClause(fieldDef.ForeignKey));
             sbConstraints.Append(GetForeignKeyOnUpdateClause(fieldDef.ForeignKey));
@@ -1751,7 +1797,11 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
                (fieldDef?.IsClustered == true ? " CLUSTERED" : "") +
                (fieldDef?.IsNonClustered == true ? " NONCLUSTERED" : "") +
                $" INDEX {indexName} ON {GetQuotedTableName(modelDef)} " +
-               $"({(isCombined ? fieldName : GetQuotedColumnName(fieldName))}); \n";
+               $"({(isCombined 
+                   ? fieldName 
+                   : fieldDef != null 
+                       ? GetQuotedColumnName(fieldDef) 
+                       : GetQuotedColumnName(fieldName))}); \n";
     }
 
     public virtual List<string> ToCreateSequenceStatements(Type tableType)
@@ -1760,6 +1810,11 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
     }
 
     public virtual string ToCreateSequenceStatement(Type tableType, string sequenceName)
+    {
+        return "";
+    }
+
+    public virtual string ToResetSequenceStatement(Type tableType, string columnName, int value)
     {
         return "";
     }
@@ -1827,19 +1882,19 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
         string foreignKeyName = null)
     {
         var sourceMD = ModelDefinition<T>.Definition;
-        var fieldName = sourceMD.GetFieldDefinition(field).FieldName;
+        var fieldDef = sourceMD.GetFieldDefinition(field);
 
         var referenceMD = ModelDefinition<TForeign>.Definition;
-        var referenceFieldName = referenceMD.GetFieldDefinition(foreignField).FieldName;
+        var referenceFieldDef = referenceMD.GetFieldDefinition(foreignField);
 
         string name = GetQuotedName(foreignKeyName.IsNullOrEmpty() ?
-            "fk_" + sourceMD.ModelName + "_" + fieldName + "_" + referenceFieldName :
+            "fk_" + sourceMD.ModelName + "_" + fieldDef.FieldName + "_" + referenceFieldDef.FieldName :
             foreignKeyName);
 
         return $"ALTER TABLE {GetQuotedTableName(sourceMD)} " +
-               $"ADD CONSTRAINT {name} FOREIGN KEY ({GetQuotedColumnName(fieldName)}) " +
+               $"ADD CONSTRAINT {name} FOREIGN KEY ({GetQuotedColumnName(fieldDef)}) " +
                $"REFERENCES {GetQuotedTableName(referenceMD)} " +
-               $"({GetQuotedColumnName(referenceFieldName)})" +
+               $"({GetQuotedColumnName(referenceFieldDef)})" +
                $"{GetForeignKeyOnDeleteClause(new ForeignKeyConstraint(typeof(T), onDelete: FkOptionToString(onDelete)))}" +
                $"{GetForeignKeyOnUpdateClause(new ForeignKeyConstraint(typeof(T), onUpdate: FkOptionToString(onUpdate)))};";
     }
@@ -1852,15 +1907,15 @@ public abstract class OrmLiteDialectProviderBase<TDialect>
     public virtual string ToCreateIndexStatement<T>(Expression<Func<T, object>> field, string indexName = null, bool unique = false)
     {
         var sourceDef = ModelDefinition<T>.Definition;
-        var fieldName = sourceDef.GetFieldDefinition(field).FieldName;
+        var fieldDef = sourceDef.GetFieldDefinition(field);
 
         string name = GetQuotedName(indexName.IsNullOrEmpty() ?
-            (unique ? "uidx" : "idx") + "_" + sourceDef.ModelName + "_" + fieldName :
+            (unique ? "uidx" : "idx") + "_" + sourceDef.ModelName + "_" + fieldDef.FieldName :
             indexName);
 
         string command = $"CREATE {(unique ? "UNIQUE" : "")} " +
                          $"INDEX {name} ON {GetQuotedTableName(sourceDef)}" +
-                         $"({GetQuotedColumnName(fieldName)});";
+                         $"({GetQuotedColumnName(fieldDef)});";
         return command;
     }
 
