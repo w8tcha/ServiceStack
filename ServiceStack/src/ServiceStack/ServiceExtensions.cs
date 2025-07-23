@@ -153,10 +153,15 @@ public static class ServiceExtensions
         if (Log.IsDebugEnabled)
             Log.DebugFormat("Removing Session: {0}", sessionId);
         
+        httpReq.Items.Remove(Keywords.Session);
+
+        if (httpReq.Items.ContainsKey(Keywords.HasClearedSession))
+            return; // already cleared session
+
         var sessionKey = SessionFeature.GetSessionKey(sessionId);
         await httpReq.GetCacheClientAsync().RemoveAsync(sessionKey, token).ConfigAwait();
-
-        httpReq.Items.Remove(Keywords.Session);
+        
+        httpReq.Items[Keywords.HasClearedSession] = true; // reset pre-authenticated state
     }
 
     public static IAuthSession GetSession(this IServiceBase service, bool reload = false)
