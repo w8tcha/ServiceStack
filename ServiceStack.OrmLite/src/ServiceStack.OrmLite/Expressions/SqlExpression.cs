@@ -1341,6 +1341,11 @@ namespace ServiceStack.OrmLite
             return DialectProvider.GetQuotedTableName(modelDef);
         }
 
+        public string SqlColumn(FieldDefinition fieldDef)
+        {
+            return DialectProvider.GetQuotedColumnName(fieldDef);
+        }
+
         public string SqlColumn(string columnName)
         {
             return DialectProvider.GetQuotedColumnName(columnName);
@@ -1775,7 +1780,7 @@ namespace ServiceStack.OrmLite
                     }
 
                     if (right is bool &&
-                        (left == null || left == PartialSqlString.Null))
+                        (left == null || left.ToString().Equals("null", StringComparison.OrdinalIgnoreCase)))
                     {
                         if (operand == "=")
                             return false; // "null == true/false" becomes "false"
@@ -1834,13 +1839,13 @@ namespace ServiceStack.OrmLite
                 }
             }
 
-            if (left == PartialSqlString.Null)
+            if (left.ToString().Equals("null", StringComparison.OrdinalIgnoreCase))
             {
                 Swap(ref left, ref right); // "null is x" will not work, so swap the operands
             }
 
             var separator = sep;
-            if (right == PartialSqlString.Null)
+            if (right.ToString().Equals("null", StringComparison.OrdinalIgnoreCase))
             {
                 if (operand == "=")
                     operand = "is";
@@ -2229,7 +2234,7 @@ namespace ServiceStack.OrmLite
                         {
                             if (item is SelectItemColumn columnItem)
                             {
-                                columnItem.Alias = member.Name + columnItem.ColumnName;
+                                columnItem.Alias = member.Name + columnItem.GetColumnName();
                             }
                         }
                     }
@@ -3286,6 +3291,8 @@ namespace ServiceStack.OrmLite
         /// Table name or alias used to prefix the column name, if any. Already quoted.
         /// </summary>
         public string QuotedTableAlias { get; set; }
+        
+        public string GetColumnName() => fieldDef != null ? fieldDef.Name : ColumnName;
 
         public override string ToString()
         {
