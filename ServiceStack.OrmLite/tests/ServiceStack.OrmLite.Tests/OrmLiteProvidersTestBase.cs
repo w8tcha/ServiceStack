@@ -8,6 +8,7 @@ using System.IO;
 using System.Data.SqlClient;
 using System.Linq;
 using System.Threading.Tasks;
+using MySql.Data.MySqlClient;
 using NUnit.Framework;
 using NUnit.Framework.Interfaces;
 using NUnit.Framework.Internal;
@@ -83,6 +84,17 @@ public abstract class OrmLiteProvidersTestBase
 
     public virtual IDbConnection OpenDbConnection() => DbFactory.OpenDbConnection();
     public virtual Task<IDbConnection> OpenDbConnectionAsync() => DbFactory.OpenDbConnectionAsync();
+
+    protected bool IgnoreException(Exception e)
+    {
+        // GitHub Actions "Integration Tests OrmLite" Docker Container does not have local infile enabled
+        if (e is MySqlException me && me.Message.Contains("server or client has disabled the local infile capability"))
+        {
+            Console.WriteLine("WARN Ignoring MySqlException: " + e.Message);
+            return true;
+        }
+        return false;
+    }
 }
 
 /// <summary>
@@ -97,7 +109,7 @@ public class DialectFeatures
     {
         // Tag dialects with supported features and use to toggle in tests
         RowOffset = (Dialect.SqlServer2012 | Dialect.SqlServer2014 | Dialect.SqlServer2016 | Dialect.SqlServer2017 | Dialect.SqlServer2019 | Dialect.SqlServer2022).HasFlag(dialect);
-        SchemaSupport = !(Dialect.Sqlite | Dialect.AnyPostgreSql).HasFlag(dialect);
+        SchemaSupport = !(Dialect.Sqlite).HasFlag(dialect);
     }
 }
 

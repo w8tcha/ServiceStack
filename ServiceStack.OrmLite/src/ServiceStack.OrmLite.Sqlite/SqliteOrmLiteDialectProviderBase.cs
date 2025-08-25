@@ -170,7 +170,7 @@ public abstract class SqliteOrmLiteDialectProviderBase : OrmLiteDialectProviderB
 
     private string GetTriggerName(ModelDefinition modelDef)
     {
-        return RowVersionTriggerFormat.Fmt(GetTableName(modelDef));
+        return RowVersionTriggerFormat.Fmt(GetTableNameOnly(new(modelDef)));
     }
 
     public override string ToPostCreateTableStatement(ModelDefinition modelDef)
@@ -178,7 +178,7 @@ public abstract class SqliteOrmLiteDialectProviderBase : OrmLiteDialectProviderB
         if (modelDef.RowVersion != null)
         {
             var triggerName = GetTriggerName(modelDef);
-            var tableName = GetTableName(modelDef);
+            var tableName = GetQuotedTableName(modelDef);
             var triggerBody = string.Format("UPDATE {0} SET {1} = OLD.{1} + 1 WHERE {2} = NEW.{2};",
                 tableName, 
                 modelDef.RowVersion.FieldName.SqlColumn(this), 
@@ -277,52 +277,31 @@ public abstract class SqliteOrmLiteDialectProviderBase : OrmLiteDialectProviderB
     {
         return schema == null 
             ? "SELECT name FROM sqlite_master WHERE type ='table' AND name NOT LIKE 'sqlite_%'"
-            : "SELECT name FROM sqlite_master WHERE type ='table' AND name LIKE {0}".SqlFmt(this, GetTableName("",schema) + "%");
+            : "SELECT name FROM sqlite_master WHERE type ='table' AND name LIKE {0}".SqlFmt(this, NamingStrategy.GetSchemaName(schema) + "%");
     }
 
-    public override string GetSchemaName(string? schema)
-    {
-        return schema != null
-            ? NamingStrategy.GetSchemaName(schema).Replace(".", "_")
-            : NamingStrategy.GetSchemaName(schema);
-    }
+    public override string QuoteSchema(string schema, string table) =>
+        GetQuotedName(JoinSchema(schema, table));
+    public override string JoinSchema(string schema, string table) => string.IsNullOrEmpty(schema) || table.StartsWith(schema + "_") 
+        ? table
+        : schema + "_" + table;
 
-    public override string GetTableName(string table, string? schema = null) => 
-        GetTableName(table, schema, useStrategy: true);
-
-    public override string GetTableAlias(string alias, string? schema, bool useStrategy)
+    public override string GetTableName(TableRef tableRef)
     {
-        if (useStrategy)
-        {
-            return schema != null && !alias.StartsWithIgnoreCase(schema + "_")
-                ? $"{NamingStrategy.GetSchemaName(schema)}_{NamingStrategy.GetAlias(alias)}"
+        if (tableRef.QuotedName != null)
+            return tableRef.QuotedName.Replace("\"","");
+        var alias = tableRef.ModelDef?.Alias; 
+        if (alias != null)
+            return tableRef.ModelDef?.Schema != null
+                ? NamingStrategy.GetSchemaName(tableRef.ModelDef.Schema) + "_" + NamingStrategy.GetAlias(alias)
                 : NamingStrategy.GetAlias(alias);
-        }
-            
-        return schema != null && !alias.StartsWithIgnoreCase(schema + "_")
-            ? $"{schema}_{alias}"
-            : alias;
+        
+        var schema = tableRef.ModelDef?.Schema ?? tableRef.Schema;
+        var tableName = tableRef.ModelDef?.Name ?? tableRef.Name;
+        return schema != null
+            ? NamingStrategy.GetSchemaName(schema) + "_" + NamingStrategy.GetTableName(tableName)
+            : NamingStrategy.GetTableName(tableName);
     }
-
-    public override string GetTableName(string table, string? schema, bool useStrategy)
-    {
-        if (useStrategy)
-        {
-            return schema != null && !table.StartsWithIgnoreCase(schema + "_")
-                ? $"{NamingStrategy.GetSchemaName(schema)}_{NamingStrategy.GetTableName(table)}"
-                : NamingStrategy.GetTableName(table);
-        }
-            
-        return schema != null && !table.StartsWithIgnoreCase(schema + "_")
-            ? $"{schema}_{table}"
-            : table;
-    }
-
-    public override string GetQuotedTableAlias(string tableName, string? schema = null) =>
-        GetQuotedName(GetTableAlias(tableName, schema));
-
-    public override string GetQuotedTableName(string tableName, string? schema = null) =>
-        GetQuotedName(GetTableName(tableName, schema));
 
     public override SqlExpression<T> SqlExpression<T>() => new SqliteExpression<T>(this);
 
@@ -340,10 +319,10 @@ public abstract class SqliteOrmLiteDialectProviderBase : OrmLiteDialectProviderB
         throw new NotImplementedException("Schemas are not supported by sqlite");
     }
 
-    public override bool DoesTableExist(IDbCommand dbCmd, string tableName, string? schema = null)
+    public override bool DoesTableExist(IDbCommand dbCmd, TableRef tableRef)
     {
         var sql = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = {0}"
-            .SqlFmt(this, GetTableName(tableName, schema, useStrategy: false));
+            .SqlFmt(this, GetTableName(tableRef));
 
         dbCmd.CommandText = sql;
         var result = dbCmd.LongScalar();
@@ -351,10 +330,10 @@ public abstract class SqliteOrmLiteDialectProviderBase : OrmLiteDialectProviderB
         return result > 0;
     }
 
-    public override bool DoesColumnExist(IDbConnection db, string columnName, string tableName, string? schema = null)
+    public override bool DoesColumnExist(IDbConnection db, string columnName, TableRef tableRef)
     {
         var sql = "PRAGMA table_info({0})"
-            .SqlFmt(this, GetTableName(tableName, schema, useStrategy: false));
+            .SqlFmt(this, GetTableName(tableRef));
 
         var columns = db.SqlList<Dictionary<string, object>>(sql);
         foreach (var column in columns)

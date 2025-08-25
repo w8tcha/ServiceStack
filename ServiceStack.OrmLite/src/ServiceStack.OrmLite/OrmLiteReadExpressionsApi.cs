@@ -7,6 +7,7 @@ using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using ServiceStack.OrmLite.Dapper;
 using ServiceStack.Text;
 
 namespace ServiceStack.OrmLite;
@@ -118,7 +119,9 @@ public static class OrmLiteReadExpressionsApi
 
     public static TableOptions TableAlias(this IDbConnection db, string alias) => new TableOptions { Alias = alias };
 
-    public static string GetTableName<T>(this IDbConnection db) => db.GetDialectProvider().GetTableName(ModelDefinition<T>.Definition);
+    public static string GetTableName<T>(this IDbConnection db) => db.GetDialectProvider().GetTableName(new(ModelDefinition<T>.Definition));
+    public static string GetTableName(this IDbConnection db, Type type) => db.GetDialectProvider().GetTableName(new(type));
+    public static string GetTableName(this IDbConnection db, ModelDefinition modelDef) => db.GetDialectProvider().GetTableName(new(modelDef));
 
     public static List<string> GetTableNames(this IDbConnection db) => GetTableNames(db, null);
     public static List<string> GetTableNames(this IDbConnection db, string schema) => db.Column<string>(db.GetDialectProvider().ToTableNamesStatement(schema));
@@ -174,7 +177,7 @@ public static class OrmLiteReadExpressionsApi
                 sb.Append(" UNION ");
                 
             // retain *real* table names and skip using naming strategy
-            sb.AppendLine($"SELECT {OrmLiteUtils.QuotedLiteral(tableName)}, COUNT(*) FROM {dialect.GetQuotedTableName(tableName, schemaName, useStrategy:false)}");
+            sb.AppendLine($"SELECT {dialect.GetQuotedValue(tableName)}, COUNT(*) FROM {dialect.QuoteSchema(schemaName, tableName)}");
         }
 
         var sql = StringBuilderCache.ReturnAndFree(sb);
@@ -391,7 +394,15 @@ public static class OrmLiteReadExpressionsApi
     {
         return dbConn.Exec(dbCmd => dbCmd.RowCount(sql, sqlParams));
     }
-
+    
+    /// <summary>
+    /// Return the number of rows in the specified table
+    /// </summary>
+    public static long RowCount<T>(this IDbConnection dbConn)
+    {
+        return dbConn.SqlScalar<long>(dbConn.From<T>().Select(Sql.Count("*")));
+    }
+    
     /// <summary>
     /// Returns results with references from using a LINQ Expression. E.g:
     /// <para>db.LoadSelect&lt;Person&gt;(x =&gt; x.Age &gt; 40)</para>

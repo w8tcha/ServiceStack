@@ -39,6 +39,16 @@ public static class OrmLiteDialectProviderExtensions
         return (dialect ?? OrmLiteConfig.DialectProvider).NamingStrategy.GetColumnName(columnName);
     }
 
+    public static string GetQuotedTableName(this IOrmLiteDialectProvider dialect, string tableName)
+    {
+        return dialect.QuoteTable(new(tableName));
+    }
+
+    public static string GetTableName(this IOrmLiteDialectProvider dialect, Type table)
+    {
+        return dialect.GetTableName(new(table.GetModelDefinition()));
+    }
+
     public static string GetQuotedColumnName(this IOrmLiteDialectProvider dialect,
         ModelDefinition tableDef, FieldDefinition fieldDef)
     {
@@ -53,7 +63,7 @@ public static class OrmLiteDialectProviderExtensions
         if (tableAlias == null)
             return dialect.GetQuotedColumnName(tableDef, fieldDef);
             
-        return dialect.GetQuotedTableName(tableAlias) //aliases shouldn't have schemas
+        return dialect.QuoteTable(tableAlias) //aliases shouldn't have schemas
                + "." +
                dialect.GetQuotedColumnName(fieldDef);
     }
@@ -72,7 +82,7 @@ public static class OrmLiteDialectProviderExtensions
         if (tableAlias == null)
             return dialect.GetQuotedColumnName(tableDef, fieldName);
             
-        return dialect.GetQuotedTableName(tableAlias) //aliases shouldn't have schemas 
+        return dialect.QuoteTable(tableAlias) //aliases shouldn't have schemas 
                + "." +
                dialect.GetQuotedColumnName(fieldName);
     }

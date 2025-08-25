@@ -116,22 +116,14 @@ public interface IOrmLiteDialectProvider
     int GetValues(IDataReader reader, object[] values);
 
     IDbConnection CreateConnection(string filePath, Dictionary<string, string> options);
-        
-    string GetTableName(Type modelType);
-    string GetTableName(ModelDefinition modelDef);
 
-    string GetTableName(ModelDefinition modelDef, bool useStrategy);
+    string GetTableNameOnly(TableRef tableRef);
+    string GetTableName(TableRef tableRef);
 
-    string GetTableName(string table, string schema = null);
-    string GetTableName(string table, string schema, bool useStrategy);
-
-    string GetQuotedTableName(TableRef tableRef);
+    string QuoteSchema(string schema, string table);
+    string QuoteTable(TableRef tableRef);
     string GetQuotedTableName(Type modelType);
     string GetQuotedTableName(ModelDefinition modelDef);
-
-    string GetQuotedTableName(string tableName, string schema=null);
-
-    string GetQuotedTableName(string tableName, string schema, bool useStrategy);
 
     string GetQuotedColumnName(string columnName);
     string GetQuotedColumnName(FieldDefinition fieldDef);
@@ -241,12 +233,12 @@ public interface IOrmLiteDialectProvider
 
     bool DoesSchemaExist(IDbCommand dbCmd, string schema);
     Task<bool> DoesSchemaExistAsync(IDbCommand dbCmd, string schema, CancellationToken token=default);
-    bool DoesTableExist(IDbConnection db, string tableName, string schema = null);
-    Task<bool> DoesTableExistAsync(IDbConnection db, string tableName, string schema = null, CancellationToken token=default);
-    bool DoesTableExist(IDbCommand dbCmd, string tableName, string schema = null);
-    Task<bool> DoesTableExistAsync(IDbCommand dbCmd, string tableName, string schema = null, CancellationToken token=default);
-    bool DoesColumnExist(IDbConnection db, string columnName, string tableName, string schema = null);
-    Task<bool> DoesColumnExistAsync(IDbConnection db, string columnName, string tableName, string schema = null, CancellationToken token=default);
+    bool DoesTableExist(IDbConnection db, TableRef tableRef);
+    Task<bool> DoesTableExistAsync(IDbConnection db, TableRef tableRef, CancellationToken token=default);
+    bool DoesTableExist(IDbCommand dbCmd, TableRef tableRef);
+    Task<bool> DoesTableExistAsync(IDbCommand dbCmd, TableRef tableRef, CancellationToken token=default);
+    bool DoesColumnExist(IDbConnection db, string columnName, TableRef tableRef);
+    Task<bool> DoesColumnExistAsync(IDbConnection db, string columnName, TableRef tableRef, CancellationToken token=default);
     bool DoesSequenceExist(IDbCommand dbCmd, string sequence);
     Task<bool> DoesSequenceExistAsync(IDbCommand dbCmd, string sequenceName, CancellationToken token=default);
 

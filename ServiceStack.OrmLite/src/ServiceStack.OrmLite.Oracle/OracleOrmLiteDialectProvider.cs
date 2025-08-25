@@ -147,7 +147,7 @@ namespace ServiceStack.OrmLite.Oracle
                 var sqlColumn = modelDef.RowVersion.FieldName.SqlColumn(this);
                 var triggerBody = $":NEW.{sqlColumn} := :OLD.{sqlColumn}+1;";
 
-                var sql = $"CREATE TRIGGER {Quote(triggerName)} BEFORE UPDATE ON {NamingStrategy.GetTableName(modelDef)} FOR EACH ROW BEGIN {triggerBody} END;";
+                var sql = $"CREATE TRIGGER {Quote(triggerName)} BEFORE UPDATE ON {GetQuotedTableName(modelDef)} FOR EACH ROW BEGIN {triggerBody} END;";
 
                 return sql;
             }
@@ -836,7 +836,7 @@ namespace ServiceStack.OrmLite.Oracle
             if (UseReturningForLastInsertId)
             {
                 var modelDef = GetModel(typeof(T));
-                var pkName = NamingStrategy.GetColumnName(modelDef.PrimaryKey.FieldName);
+                var pkName = GetQuotedColumnName(modelDef.PrimaryKey);
                 return $" RETURNING {pkName} into " + pkName;
             }
 
@@ -893,15 +893,6 @@ namespace ServiceStack.OrmLite.Oracle
             return Quote(NamingStrategy.GetTableName(modelDef));
         }
 
-        public override string GetQuotedTableName(string tableName, string schema=null)
-        {
-            return schema == null 
-                ? Quote(NamingStrategy.GetTableName(tableName))
-                : Quote(NamingStrategy.GetSchemaName(schema))
-                  + "."
-                  + Quote(NamingStrategy.GetTableName(tableName));
-        }
-
         public override string GetQuotedColumnName(string fieldName)
         {
             return Quote(NamingStrategy.GetColumnName(fieldName));
@@ -948,7 +939,7 @@ namespace ServiceStack.OrmLite.Oracle
 
         public override string ToCreateSchemaStatement(string schema)
         {
-            var sql = $"CREATE SCHEMA {GetSchemaName(schema)}";
+            var sql = $"CREATE SCHEMA {NamingStrategy.GetSchemaName(schema)}";
             return sql;
         }
 
@@ -974,13 +965,15 @@ namespace ServiceStack.OrmLite.Oracle
             return RemoveTerminatingSemicolon(command);
         }
 
-        public override bool DoesTableExist(IDbCommand dbCmd, string tableName, string schema=null)
+        public override bool DoesTableExist(IDbCommand dbCmd, TableRef tableRef)
         {
+            var tableName = GetTableNameOnly(tableRef);
             if (!WillQuote(tableName)) tableName = tableName.ToUpper();
 
             tableName = RemoveSchemaName(tableName);
             var sql = "SELECT count(*) FROM USER_TABLES WHERE TABLE_NAME = {0}".SqlFmt(tableName);
 
+            var schema = GetSchemaName(tableRef);
             if (schema != null)
                 sql += " AND OWNER = {0}".SqlFmt(schema);
 
@@ -996,8 +989,9 @@ namespace ServiceStack.OrmLite.Oracle
             return indexOfPeriod < 0 ? tableName : tableName.Substring(indexOfPeriod + 1);
         }
 
-        public override bool DoesColumnExist(IDbConnection db, string column, string tableName, string schema = null)
+        public override bool DoesColumnExist(IDbConnection db, string column, TableRef tableRef)
         {
+            var tableName = GetTableNameOnly(tableRef);
             if (!WillQuote(tableName))
                 tableName = tableName.ToUpper();
 
@@ -1007,6 +1001,7 @@ namespace ServiceStack.OrmLite.Oracle
                     + " WHERE table_name = :tableName"
                     + "   AND upper(column_name) = :column";
 
+            var schema = GetSchemaName(tableRef);
             if (schema != null)
                 sql += " AND OWNER = :schema";
 
@@ -1043,10 +1038,10 @@ namespace ServiceStack.OrmLite.Oracle
                  : foreignKeyName);
 
             return string.Format("ALTER TABLE {0} ADD CONSTRAINT {1} FOREIGN KEY ({2}) REFERENCES {3} ({4}){5}",
-                 GetQuotedTableName(sourceMd.ModelName),
+                 GetQuotedTableName(sourceMd),
                  name,
                  GetQuotedColumnName(fieldDef),
-                 GetQuotedTableName(referenceMd.ModelName),
+                 GetQuotedTableName(referenceMd),
                  GetQuotedColumnName(referenceFieldDef),
                  GetForeignKeyOnDeleteClause(new ForeignKeyConstraint(typeof(T), FkOptionToString(onDelete))));
         }

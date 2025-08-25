@@ -13,101 +13,104 @@ namespace ServiceStack.OrmLite.Tests.Async;
 [TestFixtureOrmLite]
 public class AsyncTests(DialectContext context) : OrmLiteProvidersTestBase(context)
 {
-    [Test]
-    public async Task Can_Insert_and_SelectAsync()
+    [Alias(nameof(Poco))]
+    public class Poco
     {
-        using (var db = await OpenDbConnectionAsync())
-        {
-            db.DropAndCreateTable<Poco>();
-
-            for (var i = 0; i < 3; i++)
-            {
-                await db.InsertAsync(new Poco { Id = i + 1, Name = ((char)('A' + i)).ToString() });
-            }
-
-            var results = (await db.SelectAsync<Poco>()).Map(x => x.Name);
-            Assert.That(results, Is.EqualTo(new[] { "A", "B", "C" }));
-
-            results = (await db.SelectAsync<Poco>(x => x.Name == "A")).Map(x => x.Name);
-            Assert.That(results, Is.EqualTo(new[] { "A" }));
-
-            results = (await db.SelectAsync(db.From<Poco>().Where(x => x.Name == "A"))).Map(x => x.Name);
-            Assert.That(results, Is.EqualTo(new[] { "A" }));
-        }
+        public int Id { get; set; }
+        public string Name { get; set; }
     }
 
-    [Test]
-    public async Task Does_throw_async_errors()
-    {
-        using (var db = OpenDbConnection())
-        {
-            db.DropAndCreateTable<Poco>();
-
-            try
-            {
-                var results = await db.SelectAsync(db.From<Poco>().Where("NotExists = 1"));
-                Assert.Fail("Should throw");
-            }
-            catch (Exception ex)
-            {
-                Assert.That(ex.Message.ToLower(), Does.Contain("id")
-                    .Or.Contain("notexists")
-                    .Or.Contain("not_exists"));
-            }
-
-            try
-            {
-                await db.InsertAsync(new DifferentPoco { NotExists = "Foo" });
-                Assert.Fail("Should throw");
-            }
-            catch (Exception ex)
-            {
-                Assert.That(ex.Message.ToLower(), Does.Contain("id")
-                    .Or.Contain("notexists")
-                    .Or.Contain("not_exists"));
-            }
-
-            try
-            {
-                await db.InsertAllAsync(new[] {
-                    new DifferentPoco { NotExists = "Foo" },
-                    new DifferentPoco { NotExists = "Bar" }
-                });
-                Assert.Fail("Should throw");
-            }
-            catch (Exception ex)
-            {
-                var innerEx = ex.UnwrapIfSingleException();
-                Assert.That(innerEx.Message.ToLower(), Does.Contain("id")
-                    .Or.Contain("notexists")
-                    .Or.Contain("not_exists"));
-            }
-
-            try
-            {
-                await db.UpdateAllAsync(new[] {
-                    new DifferentPoco { NotExists = "Foo" },
-                    new DifferentPoco { NotExists = "Bar" }
-                });
-                Assert.Fail("Should throw");
-            }
-            catch (Exception ex)
-            {
-                var innerEx = ex.UnwrapIfSingleException();
-                Assert.That(innerEx.Message.ToLower(), Does.Contain("id")
-                    .Or.Contain("notexists")
-                    .Or.Contain("not_exists"));
-            }
-        }
-    }
-
-    [Alias("Poco")]
+    [Alias(nameof(Poco))]
     public class DifferentPoco
     {
         public int Id { get; set; }
         public string NotExists { get; set; }
     }
 
+    [Test]
+    public async Task Can_Insert_and_SelectAsync()
+    {
+        using var db = await OpenDbConnectionAsync();
+        db.DropAndCreateTable<Poco>();
+
+        for (var i = 0; i < 3; i++)
+        {
+            await db.InsertAsync(new Poco { Id = i + 1, Name = ((char)('A' + i)).ToString() });
+        }
+
+        var results = (await db.SelectAsync<Poco>()).Map(x => x.Name);
+        Assert.That(results, Is.EqualTo(new[] { "A", "B", "C" }));
+
+        results = (await db.SelectAsync<Poco>(x => x.Name == "A")).Map(x => x.Name);
+        Assert.That(results, Is.EqualTo(new[] { "A" }));
+
+        results = (await db.SelectAsync(db.From<Poco>().Where(x => x.Name == "A"))).Map(x => x.Name);
+        Assert.That(results, Is.EqualTo(new[] { "A" }));
+    }
+
+    [Test]
+    public async Task Does_throw_async_errors()
+    {
+        using var db = OpenDbConnection();
+        db.DropAndCreateTable<Poco>();
+
+        try
+        {
+            var results = await db.SelectAsync(db.From<Poco>().Where("NotExists = 1"));
+            Assert.Fail("Should throw");
+        }
+        catch (Exception ex)
+        {
+            Assert.That(ex.Message.ToLower(), Does.Contain("id")
+                .Or.Contain("notexists")
+                .Or.Contain("not_exists"));
+        }
+
+        try
+        {
+            await db.InsertAsync(new DifferentPoco { NotExists = "Foo" });
+            Assert.Fail("Should throw");
+        }
+        catch (Exception ex)
+        {
+            Assert.That(ex.Message.ToLower(), Does.Contain("id")
+                .Or.Contain("notexists")
+                .Or.Contain("not_exists"));
+        }
+
+        try
+        {
+            await db.InsertAllAsync([
+                new DifferentPoco { NotExists = "Foo" },
+                new DifferentPoco { NotExists = "Bar" }
+            ]);
+            Assert.Fail("Should throw");
+        }
+        catch (Exception ex)
+        {
+            var innerEx = ex.UnwrapIfSingleException();
+            Assert.That(innerEx.Message.ToLower(), Does.Contain("id")
+                .Or.Contain("notexists")
+                .Or.Contain("not_exists"));
+        }
+
+        try
+        {
+            await db.UpdateAllAsync(new[] {
+                new DifferentPoco { NotExists = "Foo" },
+                new DifferentPoco { NotExists = "Bar" }
+            });
+            Assert.Fail("Should throw");
+        }
+        catch (Exception ex)
+        {
+            var innerEx = ex.UnwrapIfSingleException();
+            Assert.That(innerEx.Message.ToLower(), Does.Contain("id")
+                .Or.Contain("notexists")
+                .Or.Contain("not_exists"));
+        }
+    }
+    
     [Test]
     public async Task Test_Thread_Affinity()
     {
