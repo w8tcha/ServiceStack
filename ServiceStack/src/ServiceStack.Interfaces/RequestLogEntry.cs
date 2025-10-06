@@ -8,7 +8,7 @@ using ServiceStack.DataAnnotations;
 namespace ServiceStack;
 
 /// <summary>
-/// A log entry added by the IRequestLogger
+/// A log entry added by the IRequestLogger (In Memory, Redis, CSV, etc)
 /// </summary>
 public class RequestLogEntry : IMeta
 {

@@ -73,5 +73,4 @@ public static class ServiceStackOpenApiExtensions
 
     internal static List<IOpenApiAny> ToOpenApiEnums(this IEnumerable<string>? enums) =>
         enums.Safe().Map(x => (IOpenApiAny)new OpenApiString(x));
-
 }

@@ -13,48 +13,6 @@ using ServiceStack.Web;
 
 namespace ServiceStack.Jobs;
 
-
-public class RequestLog : IMeta
-{
-    [AutoIncrement]
-    public long Id { get; set; }
-    public string TraceId { get; set; }
-    public string OperationName { get; set; }
-    public DateTime DateTime { get; set; }
-    public int StatusCode { get; set; }
-    public string? StatusDescription { get; set; }
-    public string? HttpMethod { get; set; }
-    public string? AbsoluteUri { get; set; }
-    public string? PathInfo { get; set; }
-    public string? Request { get; set; }
-    [StringLength(StringLengthAttribute.MaxText)]
-    public string? RequestBody { get; set; }
-    public string? UserAuthId { get; set; }
-    public string? SessionId { get; set; }
-    public string? IpAddress { get; set; }
-    public string? ForwardedFor { get; set; }
-    public string? Referer { get; set; }
-    public Dictionary<string, string> Headers { get; set; } = [];
-    public Dictionary<string, string>? FormData { get; set; }
-    public Dictionary<string, string> Items { get; set; } = [];
-    public Dictionary<string, string>? ResponseHeaders { get; set; }
-    public string? Response { get; set; }
-    public string? ResponseBody { get; set; }
-    public string? SessionBody { get; set; }
-    public ResponseStatus? Error { get; set; }
-    public string? ExceptionSource { get; set; }
-    public string? ExceptionDataBody { get; set; }
-    public TimeSpan RequestDuration { get; set; }
-    public Dictionary<string, string>? Meta { get; set; }
-}
-
-[ExcludeMetadata, Tag(TagNames.Admin), ExplicitAutoQuery]
-[NamedConnection("requests.db")]
-public class AdminQueryRequestLogs : QueryDb<RequestLog>
-{
-    public DateTime? Month { get; set; }
-}
-
 public class SqliteRequestLogsService(IRequestLogger requestLogger, IAutoQueryDb autoQuery) 
     : Service
 {
@@ -404,10 +362,10 @@ public class SqliteRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema
             var sql = 
                 """
                 SELECT
-                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where OperationName IS NOT NULL)) AS 'apis',
-                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where UserAuthId IS NOT NULL)) AS 'users',
-                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where Headers LIKE '%Bearer ak-%')) AS 'apiKeys',
-                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where IpAddress IS NOT NULL)) AS 'ips'
+                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where OperationName IS NOT NULL)) AS apis,
+                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where UserAuthId IS NOT NULL)) AS users,
+                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where Headers LIKE '%Bearer ak-%')) AS apiKeys,
+                (SELECT 1 WHERE EXISTS(SELECT 1 from RequestLog where IpAddress IS NOT NULL)) AS ips
                 """;
             using var db = OpenMonthDb(DateTime.UtcNow);
             var result = db.SqlList<(int? apis, int? users, int? apiKeys, bool? ips)>(sql).FirstOrDefault();
