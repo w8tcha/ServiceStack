@@ -28,6 +28,9 @@ public class PublishTasks
     string[] IgnoreUiFiles = { };
     string[] IgnoreAdminUiFiles = { };
 
+    private string FromChatDir = Path.GetFullPath("../../../../NorthwindAuto/wwwroot/chat");
+    private string ToChatDir = Path.GetFullPath("../../../../../src/ServiceStack.AI.Chat/chat");
+
     FilesTransformer transformOptions => FilesTransformer.Defaults(debugMode: true);
 
     [Test]
@@ -36,6 +39,10 @@ public class PublishTasks
         Directory.SetCurrentDirectory(ProjectDir);
         FromModulesDir.Print();
         ToModulesDir.Print();
+     
+        "".Print();
+        FromChatDir.Print();
+        ToChatDir.Print();
     }
 
     [Test]
@@ -49,8 +56,13 @@ public class PublishTasks
             ["servicestack-client.mjs"] = "../../../../servicestack-client/dist/servicestack-client.min.mjs",
             ["servicestack-vue.mjs"] = "../../../../servicestack-vue/dist/servicestack-vue.min.mjs",
             ["vue.mjs"] = "https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js",
-            ["chart.js"] = "https://cdn.jsdelivr.net/npm/chart.js/+esm",
-            ["color.js"] = "https://cdn.jsdelivr.net/npm/@kurkle/color/+esm",
+            
+            // ["marked.mjs"] = "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.min.js",
+            // ["vue-router.mjs"] = "https://unpkg.com/vue-router@4/dist/vue-router.esm-browser.prod.js",
+            // ["idb.mjs"] = "https://cdn.jsdelivr.net/npm/idb/+esm",
+            
+            // ["chart.js"] = "https://cdn.jsdelivr.net/npm/chart.js/+esm",
+            // ["color.js"] = "https://cdn.jsdelivr.net/npm/@kurkle/color/+esm",
             //https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chunks/helpers.segment.js
             //["chart.plugin.datalabels.js"] = "https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2",
         };
@@ -154,6 +166,13 @@ public class PublishTasks
         moduleOptions.CopyAll(
             source: new FileSystemVirtualFiles(FromModulesDir.CombineWith("wwwroot/Templates/")),
             target: new FileSystemVirtualFiles(ToModulesDir.CombineWith("../Templates")),
+            cleanTarget: true,
+            afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
+        
+        // Copy ServiceStack.AI.Chat
+        transformOptions.CopyAll(
+            source: new FileSystemVirtualFiles(FromChatDir),
+            target: new FileSystemVirtualFiles(ToChatDir),
             cleanTarget: true,
             afterCopy: (file, contents) => $"{file.VirtualPath} ({contents.Length})".Print());
     }
