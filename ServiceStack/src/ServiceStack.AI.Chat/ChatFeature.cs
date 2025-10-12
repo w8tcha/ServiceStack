@@ -113,29 +113,34 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
 
             CreateProviders(Services);
         }
+        
+        appHost.ScriptContext.Args[nameof(Chat)] = new Chat(this);
+    }
+    
+    public class Chat(ChatFeature feature)
+    {
+        public List<string> Models => feature.Providers.Values
+            .SelectMany(x => x.Models.Keys)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToList();
     }
 
     public void CreateProviders(IServiceProvider services)
     {
         Providers = [];
         Dictionary<string, object>? headers = null;
-        if (Config.GetValueOrDefault("defaults") is Dictionary<string, object> defaults)
+        if (Config.TryGetObject("defaults", out var defaults))
         {
-            if (defaults.TryGetValue("headers", out var oHeaders)
-                && oHeaders is Dictionary<string, object> headersDict)
-            {
-                headers = headersDict;
-            }
+            defaults.TryGetObject("headers", out headers);
         }
             
-        if (Config!.TryGetValue("providers", out var oProviders)
-            && oProviders is Dictionary<string, object> providers)
+        if (Config.TryGetObject("providers", out var providers))
         {
             foreach (var entry in providers)
             {
                 if (entry.Value is not Dictionary<string, object?> provider) continue;
-                if (!provider.TryGetValue("type", out var oType)
-                    || oType is not string type) continue;
+                if (!provider.TryGetValue("type", out string type)) continue;
 
                 if (EnableProviders.Count > 0)
                 {
@@ -146,7 +151,7 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
                 if (!enabled) continue;
                     
                 var definition = new Dictionary<string, object?>(provider);
-                if (definition.TryGetValue("api_key", out var oApiKey) && oApiKey is string apiKey)
+                if (definition.TryGetValue("api_key", out string apiKey))
                 {
                     if (apiKey.StartsWith('$'))
                     {
@@ -263,19 +268,27 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
         await LoadAsync();
     }
 
-    public Func<CreateChatCompletion, IRequest, Task<ChatResponse>> ChatCompletionAsync { get; set; }
-    
-    public async Task<ChatResponse> DefaultChatCompletionAsync(CreateChatCompletion request, IRequest req)
+    public Func<ChatCompletion, IRequest, Task<ChatResponse>> ChatCompletionAsync { get; set; }
+    public Func<ChatCompletion, ChatResponse, IRequest, Task>? OnChatCompletionSuccessAsync { get; set; }
+    public Func<ChatCompletion, Exception, IRequest, Task>? OnChatCompletionFailedAsync { get; set; }
+
+    public async Task<ChatResponse> DefaultChatCompletionAsync(ChatCompletion request, IRequest req)
     {
         var candidateProviders = Providers
             .Where(x => x.Value.Models.ContainsKey(request.Model))
             .ToList();
         if (candidateProviders.Count == 0)
             throw HttpError.NotFound($"Model {request.Model} not found");
+        
+        var oLong = req.GetItem(Keywords.RequestDuration);
+        if (oLong == null)
+        {
+            req.SetItem(Keywords.RequestDuration, System.Diagnostics.Stopwatch.GetTimestamp());
+        }
 
         Exception? firstEx = null;
         var i = 0;
-        var chatRequest = request.ToChatCompletion();
+        var chatRequest = request;
         foreach (var entry in candidateProviders)
         {
             i++;
@@ -284,6 +297,9 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
                 var provider = entry.Value;
                 chatRequest.Model = request.Model;
                 var ret = await provider.ChatAsync(chatRequest).ConfigAwait();
+                var onSuccess = OnChatCompletionSuccessAsync;
+                if (onSuccess != null)
+                    await onSuccess(chatRequest, ret, req).ConfigAwait();
                 return ret;
             }
             catch (Exception ex)
@@ -293,10 +309,12 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
                 firstEx ??= ex;
             }
         }
-        if (firstEx != null)
-            throw firstEx;
-        
-        throw HttpError.NotFound($"Model {request.Model} not found");
+
+        firstEx ??= HttpError.NotFound($"Model {request.Model} not found");
+        var onFailed = OnChatCompletionFailedAsync; 
+        if (onFailed != null)
+            await onFailed(request, firstEx, req).ConfigAwait();
+        throw firstEx;
     }
 }
 
@@ -502,11 +520,22 @@ public class ChatServices(ILogger<ChatServices> log) : Service
         };
     }
     
-    public async Task<object> Post(CreateChatCompletion request)
+    public async Task<object> Post(ChatCompletion request)
     {
         var (feature, error) = await AssertAccessAsync();
         if (error != null) return error;
-        return await feature.ChatCompletionAsync(request, Request!).ConfigAwait();
+        var response = await feature.ChatCompletionAsync(request, Request!).ConfigAwait();
+
+        // Remove IncludeNullValues jsconfig is specified to return cleaner output
+        return new HttpResult(response) {
+            ResultScope = () => {
+                var jsScope = JsConfig.CreateScope(HostContext.Config.AllowJsConfig 
+                    ? Request!.QueryString[Keywords.JsConfig] 
+                    : null) ?? JsConfig.With(new(){});
+                jsScope.IncludeNullValues = false;
+                return jsScope;
+            }
+        };
     }
     
     public async Task<object> Get(ChatStaticFile request)

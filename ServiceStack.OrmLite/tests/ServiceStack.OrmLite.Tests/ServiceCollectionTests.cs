@@ -15,7 +15,38 @@ public class ServiceCollectionTests(DialectContext context) : OrmLiteProvidersTe
     [OneTimeTearDown]
     public void OneTimeTearDown()
     {
+    }
+
+    public class MyTable
+    {
+        public int Id { get; set; }
+    }
+
+    [Test]
+    public void Can_configure_table_aliases()
+    {
+        var services = new ServiceCollection();
+        services.AddOrmLite(options => options.UsePostgres("", dialect => {
+            dialect.NamingStrategy.TableAliases["MyTable"] = "my_table";
+            dialect.NamingStrategy.SchemaAliases["MySchema"] = "my_schema";
+            dialect.NamingStrategy.ColumnAliases["MyColumn"] = "my_column";
+        }));
+
+        var provider = services.BuildServiceProvider();
+        var dbFactory = provider.GetService<IDbConnectionFactory>();
+        var dialect = dbFactory.GetDialectProvider();
         
+        Assert.That(dialect.GetQuotedTableName("MyTable"), Is.EqualTo("\"my_table\""));
+        Assert.That(dialect.QuoteTable(new("MySchema","MyTable")), 
+            Is.EqualTo("\"my_schema\".\"my_table\""));
+        Assert.That(dialect.GetQuotedColumnName("MyColumn"), Is.EqualTo("\"my_column\""));
+
+        Assert.That(dialect.QuoteTable(new(typeof(MyTable))), Is.EqualTo("\"my_table\""));
+        Assert.That(dialect.QuoteTable(new(ModelDefinition<MyTable>.Definition)), Is.EqualTo("\"my_table\""));
+        Assert.That(dialect.QuoteTable(new("MyTable")), Is.EqualTo("\"my_table\""));
+        Assert.That(dialect.QuoteTable(new("MySchema", "MyTable")), Is.EqualTo("\"my_schema\".\"my_table\""));
+        Assert.That(dialect.QuoteTable(TableRef.Literal("\"MyTable\"")), Is.EqualTo("\"MyTable\""));
+        Assert.That(dialect.QuoteTable("MyTable"), Is.EqualTo("\"my_table\""));
     }
     
     [Test]
@@ -24,7 +55,11 @@ public class ServiceCollectionTests(DialectContext context) : OrmLiteProvidersTe
         var services = new ServiceCollection();
         
         services.AddOrmLite(options => {
-                options.UseSqlite(":memory:")
+                options.UseSqlite(":memory:", dialect => {
+                        dialect.NamingStrategy.TableAliases["MyTable"] = "my_table";
+                        dialect.NamingStrategy.SchemaAliases["MySchema"] = "my_schema";
+                        dialect.NamingStrategy.ColumnAliases["MyColumn"] = "my_column";
+                    })
                     .ConfigureJson(json => {
                         json.DefaultSerializer = JsonSerializerType.ServiceStackJson;
                         json.JsonObjectTypes.Add(typeof(object));

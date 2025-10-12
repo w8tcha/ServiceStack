@@ -649,14 +649,14 @@ public class AiChatIntegrationTests
     public async Task Can_send_ChatCompletion_request()
     {
         var client = await CreateClientAsync();
-        var response = await client.SendAsync(new CreateChatCompletion
+        var response = await client.SendAsync(new ChatCompletion
         {
             Model = "gpt-oss:20b",
             Messages = [
                 Message.Text("Capital of France?"),
             ]
         });
-        ClientConfig.PrintSystemJson(response);
+        ClientConfig.PrintDump(response);
         AssertValidResponse(response);
     }
 }

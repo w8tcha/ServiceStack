@@ -17,7 +17,7 @@ public class AiChatTests
         {
             feature.Variables = new()
             {
-                ["OPENROUTER_FREE_API_KEY"] = "fake-key",
+                ["OPENROUTER_API_KEY"] = "fake-key",
                 ["GROQ_API_KEY"] = "fake-key",
                 ["GOOGLE_FREE_API_KEY"] = "fake-key",
                 ["CODESTRAL_API_KEY"] = "fake-key",
@@ -99,7 +99,7 @@ public class AiChatTests
     {
         var client = await CreateClientAsync();
         var response = await client.SendAsync(new ChatModels());
-        ClientConfig.PrintSystemJson(response);
+        ClientConfig.PrintDump(response);
         Assert.That(response, Is.Not.Null);
         Assert.That(response.Length, Is.GreaterThan(0));
     }
@@ -117,7 +117,7 @@ public class AiChatTests
     {
         var client = await CreateClientAsync();
         var response = await client.SendAsync(new ChatStatus());
-        ClientConfig.PrintSystemJson(response);
+        ClientConfig.PrintDump(response);
         Assert.That(response, Is.Not.Null);
         Assert.That(response.All.Count, Is.GreaterThan(0));
         Assert.That(response.Enabled.Count, Is.GreaterThan(0));
@@ -135,7 +135,7 @@ public class AiChatTests
             Id = "mistral",
             Disable = true,
         });
-        ClientConfig.PrintSystemJson(response);
+        ClientConfig.PrintDump(response);
         Assert.That(response, Is.Not.Null);
         Assert.That(response.Enabled, Does.Not.Contain("mistral"));
         Assert.That(response.Disabled, Does.Contain("mistral"));
