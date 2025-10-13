@@ -129,7 +129,7 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
             MaxKeys = 1,
         });
 
-        if (response.S3Objects.Count == 0)
+        if (response.S3Objects == null || response.S3Objects.Count == 0)
             return null;
 
         return new S3VirtualDirectory(this, dirPath, GetParentDirectory(dirPath));
@@ -287,7 +287,7 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
             Prefix = prefix,
         });
 
-        foreach (var file in response.S3Objects)
+        foreach (var file in response.S3Objects ?? [])
         {
             var filePath = SanitizePath(file.Key);
 
@@ -295,7 +295,7 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
             yield return new S3VirtualFile(this, new S3VirtualDirectory(this, dirPath, GetParentDirectory(dirPath)))
             {
                 FilePath = filePath,
-                ContentLength = file.Size,
+                ContentLength = file.Size ?? 0,
                 FileLastModified = file.LastModified,
                 Etag = file.ETag,
             };
@@ -315,7 +315,7 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
                 ContinuationToken = response?.NextContinuationToken
             }, token);
 
-            foreach (var file in response.S3Objects)
+            foreach (var file in response.S3Objects ?? [])
             {
                 var filePath = SanitizePath(file.Key);
 
@@ -323,13 +323,13 @@ public partial class S3VirtualFiles : AbstractVirtualPathProviderBase, IVirtualF
                 yield return new S3VirtualFile(this, new S3VirtualDirectory(this, dirPath, GetParentDirectory(dirPath)))
                 {
                     FilePath = filePath,
-                    ContentLength = file.Size,
+                    ContentLength = file.Size ?? 0,
                     FileLastModified = file.LastModified,
                     Etag = file.ETag,
                 };
             }
 
-            if (!response.IsTruncated)
+            if (response.IsTruncated != true)
                 yield break;
         }
     }

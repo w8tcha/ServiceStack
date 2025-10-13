@@ -78,9 +78,12 @@ namespace ServiceStack.Aws.Sqs
                         Entries = entries
                     });
 
-                    if (response.Failed != null && response.Failed.Count > 0)
+                    if (response.Failed is { Count: > 0 })
                     {
-                        response.Failed.Each(f => HandleError(f.ToException()));
+                        foreach (var failed in response.Failed)
+                        {
+                            HandleError(failed.ToException());
+                        }
                     }
                 }
             }
@@ -285,7 +288,7 @@ namespace ServiceStack.Aws.Sqs
             if (receiveBuffer.Count > 0 && receiveBuffer.TryDequeue(out var toReturn))
                 return toReturn;
 
-            request.MaxNumberOfMessages = Math.Min(SqsQueueDefinition.MaxBatchReceiveItems, Math.Max(request.MaxNumberOfMessages, 1));
+            request.MaxNumberOfMessages = Math.Min(SqsQueueDefinition.MaxBatchReceiveItems, Math.Max(request.MaxNumberOfMessages ?? 0, 1));
 
             var response = SqsClient.ReceiveMessage(request);
 
