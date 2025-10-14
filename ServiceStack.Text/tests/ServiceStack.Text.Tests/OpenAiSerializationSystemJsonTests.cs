@@ -1,13 +1,26 @@
 #if NET8_0_OR_GREATER
 #nullable enable
 
+using System;
+using System.Linq;
 using NUnit.Framework;
 using ServiceStack.AI;
 
 namespace ServiceStack.Text.Tests;
 
-public class OpenAiSerializationJsonTests
+public class OpenAiSerializationSystemJsonTests
 {
+    static System.Text.Json.JsonSerializerOptions options = TextConfig.CreateSystemJsonOptions();
+    
+    static string ToJson<T>(T obj) => System.Text.Json.JsonSerializer.Serialize(obj, options);
+    
+    public static T? FromJson<T>(string json)
+    {
+        return json.FromJson<T>(); // Using ServiceStack.Text JSON
+        // TODO: System.Text.Json doesn't deserialize DataContract classes with JsonPolymorphic/JsonDerivedType
+        // return System.Text.Json.JsonSerializer.Deserialize<T>(json, options);
+    }
+    
     [Test]
     public void Can_serialize_ChatCompletion_with_Text_Content()
     {
@@ -19,15 +32,19 @@ public class OpenAiSerializationJsonTests
             ]
         };
         
-        var json = request.ToJson();
+        var json = ToJson(request);
         json.Print();
+        // Ensure 'type' in abstract class is not serialized twice
+        Assert.That(json, Is.EqualTo(
+            "{\"messages\":[{\"content\":[{\"type\":\"text\",\"text\":\"Hello World\"}],\"role\":\"user\"}]}"));
         
-        var fromJson = json.FromJson<ChatCompletion>();
+        var fromJson = FromJson<ChatCompletion>(json)!;
         var message = fromJson.Messages[0].Content;
         Assert.IsNotNull(message);
         Assert.That(message!.Count, Is.EqualTo(1));
         var text = message[0] as AiTextContent;
         Assert.IsNotNull(text);
+        Assert.That(text!.Type, Is.EqualTo("text"));
         Assert.That(text!.Text, Is.EqualTo("Hello World"));
     }
     
@@ -43,10 +60,10 @@ public class OpenAiSerializationJsonTests
             ]
         };
         
-        var json = request.ToJson();
+        var json = ToJson(request);
         json.Print();
         
-        var fromJson = json.FromJson<ChatCompletion>();
+        var fromJson = FromJson<ChatCompletion>(json)!;
         var message = fromJson.Messages[0].Content;
         Assert.IsNotNull(message);
         Assert.That(message!.Count, Is.EqualTo(2));
@@ -72,10 +89,10 @@ public class OpenAiSerializationJsonTests
             ]
         };
         
-        var json = request.ToJson();
+        var json = ToJson(request);
         json.Print();
         
-        var fromJson = json.FromJson<ChatCompletion>();
+        var fromJson = FromJson<ChatCompletion>(json)!;
         var message = fromJson.Messages[0].Content;
         Assert.IsNotNull(message);
         Assert.That(message!.Count, Is.EqualTo(2));
@@ -102,10 +119,10 @@ public class OpenAiSerializationJsonTests
             ]
         };
         
-        var json = request.ToJson();
+        var json = ToJson(request);
         json.Print();
         
-        var fromJson = json.FromJson<ChatCompletion>();
+        var fromJson = FromJson<ChatCompletion>(json)!;
         var message = fromJson.Messages[0].Content;
         Assert.IsNotNull(message);
         Assert.That(message!.Count, Is.EqualTo(2));
