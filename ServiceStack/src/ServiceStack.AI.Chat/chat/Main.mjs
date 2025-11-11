@@ -1,16 +1,20 @@
 import { ref, computed, nextTick, watch, onMounted, provide, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useFormatters } from '@servicestack/vue'
 import { useThreadStore } from './threadStore.mjs'
-import { storageObject, addCopyButtons } from './utils.mjs'
+import { storageObject, addCopyButtons, formatCost, statsTitle } from './utils.mjs'
 import { renderMarkdown } from './markdown.mjs'
 import ChatPrompt, { useChatPrompt } from './ChatPrompt.mjs'
 import SignIn from './SignIn.mjs'
+import OAuthSignIn from './OAuthSignIn.mjs'
 import Avatar from './Avatar.mjs'
 import ModelSelector from './ModelSelector.mjs'
 import SystemPromptSelector from './SystemPromptSelector.mjs'
 import SystemPromptEditor from './SystemPromptEditor.mjs'
 import { useSettings } from "./SettingsDialog.mjs"
 import Welcome from './Welcome.mjs'
+
+const { humanifyMs, humanifyNumber } = useFormatters()
 
 export default {
     components: {
@@ -19,32 +23,36 @@ export default {
         SystemPromptEditor,
         ChatPrompt,
         SignIn,
+        OAuthSignIn,
         Avatar,
         Welcome,
     },
     template: `
         <div class="flex flex-col h-full w-full">
-            <!-- Header with model and prompt selectors -->
-            <div class="border-b border-gray-200 bg-white px-2 py-2 w-full min-h-16">
-                <div class="flex items-center justify-between w-full">
+            <!-- Header with model and prompt selectors (hidden when auth required and not authenticated) -->
+            <div v-if="!($ai.requiresAuth && !$ai.auth)" 
+                :class="!$ai.isSidebarOpen ? 'pl-6' : ''"
+                class="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-2 w-full min-h-16">
+                <div class="flex flex-wrap items-center justify-between w-full">
                     <ModelSelector :models="models" v-model="selectedModel" @updated="configUpdated" />
 
-                    <div class="flex items-center space-x-2">
-                        <SystemPromptSelector :prompts="prompts" v-model="selectedPrompt" 
+                    <div class="flex items-center space-x-2 pl-4">
+                        <SystemPromptSelector :prompts="prompts" v-model="selectedPrompt"
                             :show="showSystemPrompt" @toggle="showSystemPrompt = !showSystemPrompt" />
                         <Avatar />
                     </div>
                 </div>
             </div>
 
-            <SystemPromptEditor v-if="showSystemPrompt" 
+            <SystemPromptEditor v-if="showSystemPrompt && !($ai.requiresAuth && !$ai.auth)"
                 v-model="currentSystemPrompt" :prompts="prompts" :selected="selectedPrompt" />
 
             <!-- Messages Area -->
             <div class="flex-1 overflow-y-auto" ref="messagesContainer">
                 <div class="mx-auto max-w-6xl px-4 py-6">
                     <div v-if="$ai.requiresAuth && !$ai.auth">
-                        <SignIn @done="$ai.signIn($event)" />
+                        <OAuthSignIn v-if="$ai.authType === 'oauth'" @done="$ai.signIn($event)" />
+                        <SignIn v-else @done="$ai.signIn($event)" />
                     </div>
                     <!-- Welcome message when no thread is selected -->
                     <div v-else-if="!currentThread" class="text-center py-12">
@@ -56,12 +64,12 @@ export default {
                         </div>
 
                         <!-- Export/Import buttons -->
-                        <div class="mt-2 flex space-x-3 justify-center">
+                        <div class="mt-2 flex space-x-3 justify-center items-center">
                             <button type="button"
-                                @click="exportThreads"
+                                @click="(e) => e.altKey ? exportRequests() : exportThreads()"
                                 :disabled="isExporting"
                                 :title="'Export ' + threads?.threads?.value?.length + ' conversations'"
-                                class="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="inline-flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <svg v-if="!isExporting" class="size-5 mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
                                     <path fill="currentColor" d="m12 16l-5-5l1.4-1.45l2.6 2.6V4h2v8.15l2.6-2.6L17 11zm-6 4q-.825 0-1.412-.587T4 18v-3h2v3h12v-3h2v3q0 .825-.587 1.413T18 20z"></path>
@@ -77,7 +85,7 @@ export default {
                                 @click="triggerImport"
                                 :disabled="isImporting"
                                 title="Import conversations from JSON file"
-                                class="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                class="inline-flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <svg v-if="!isImporting" class="size-5 mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
                                     <path fill="currentColor" d="m14 12l-4-4v3H2v2h8v3m10 2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v3h2V6h12v12H6v-3H4v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2"/>
@@ -97,6 +105,9 @@ export default {
                                 @change="handleFileImport"
                                 class="hidden"
                             />
+
+                            <DarkModeToggle />
+
                         </div>
 
                     </div>
@@ -113,15 +124,15 @@ export default {
                             <div class="flex-shrink-0 flex flex-col justify-center">
                                 <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium"
                                      :class="message.role === 'user'
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-gray-600 text-white'"
+                                        ? 'bg-blue-100 dark:bg-blue-900 text-gray-900 dark:text-gray-100 border border-blue-200 dark:border-blue-700'
+                                        : 'bg-gray-600 dark:bg-gray-500 text-white'"
                                 >
                                     {{ message.role === 'user' ? 'U' : 'AI' }}
                                 </div>
 
                                 <!-- Delete button (shown on hover) -->
                                 <button type="button" @click.stop="threads.deleteMessageFromThread(currentThread.id, message.id)"
-                                    class="mx-auto opacity-0 group-hover:opacity-100 mt-2 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                                    class="mx-auto opacity-0 group-hover:opacity-100 mt-2 rounded text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition-all"
                                     title="Delete message">
                                     <svg class="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -133,18 +144,19 @@ export default {
                             <div
                                 class="message rounded-lg px-4 py-3 relative group"
                                 :class="message.role === 'user'
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-100 text-gray-900 border border-gray-200'"
+                                    ? 'bg-blue-100 dark:bg-blue-900 text-gray-900 dark:text-gray-100 border border-blue-200 dark:border-blue-700'
+                                    : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700'"
                             >
                                 <!-- Copy button in top right corner -->
                                 <button
                                     type="button"
                                     @click="copyMessageContent(message)"
-                                    class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 rounded hover:bg-black/10 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    :class="message.role === 'user' ? 'text-white/70 hover:text-white hover:bg-white/20' : 'text-gray-500 hover:text-gray-700'"
+                                    class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 focus:outline-none focus:ring-0"
+                                    :class="message.role === 'user' ? 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'"
                                     title="Copy message content"
                                 >
-                                    <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <svg v-if="copying === message" class="size-4 text-green-500 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                    <svg v-else class="size-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
                                         <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
                                     </svg>
@@ -153,69 +165,108 @@ export default {
                                 <div
                                     v-if="message.role === 'assistant'"
                                     v-html="renderMarkdown(message.content)"
-                                    class="prose prose-sm max-w-none"
+                                    class="prose prose-sm max-w-none dark:prose-invert"
                                 ></div>
 
                                 <!-- Collapsible reasoning section -->
                                 <div v-if="message.role === 'assistant' && message.reasoning" class="mt-2">
-                                    <button type="button" @click="toggleReasoning(message.id)" class="text-xs text-gray-600 hover:text-gray-800 flex items-center space-x-1">
+                                    <button type="button" @click="toggleReasoning(message.id)" class="text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 flex items-center space-x-1">
                                         <svg class="w-3 h-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" :class="isReasoningExpanded(message.id) ? 'transform rotate-90' : ''"><path fill="currentColor" d="M7 5l6 5l-6 5z"/></svg>
                                         <span>{{ isReasoningExpanded(message.id) ? 'Hide reasoning' : 'Show reasoning' }}</span>
                                     </button>
-                                    <div v-if="isReasoningExpanded(message.id)" class="mt-2 rounded border border-gray-200 bg-gray-50 p-2">
-                                        <div v-if="typeof message.reasoning === 'string'" v-html="renderMarkdown(message.reasoning)" class="prose prose-xs max-w-none"></div>
-                                        <pre v-else class="text-xs whitespace-pre-wrap overflow-x-auto">{{ formatReasoning(message.reasoning) }}</pre>
+                                    <div v-if="isReasoningExpanded(message.id)" class="mt-2 rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-2">
+                                        <div v-if="typeof message.reasoning === 'string'" v-html="renderMarkdown(message.reasoning)" class="prose prose-xs max-w-none dark:prose-invert"></div>
+                                        <pre v-else class="text-xs whitespace-pre-wrap overflow-x-auto text-gray-900 dark:text-gray-100">{{ formatReasoning(message.reasoning) }}</pre>
                                     </div>
                                 </div>
 
                                 <div v-if="message.role !== 'assistant'" class="whitespace-pre-wrap">{{ message.content }}</div>
                                 <div class="mt-2 text-xs opacity-70">
-                                    {{ formatTime(message.timestamp) }}
+                                    <span>{{ formatTime(message.timestamp) }}</span>
+                                    <span v-if="message.usage" :title="tokensTitle(message.usage)">
+                                        &#8226;
+                                        {{ humanifyNumber(message.usage.tokens) }} tokens
+                                        <span v-if="message.usage.cost">&#183; {{ message.usage.cost }}</span>
+                                        <span v-if="message.usage.duration"> in {{ humanifyMs(message.usage.duration) }}</span>
+                                    </span>
                                 </div>
+                            </div>
+
+                            <!-- Edit and Redo buttons (shown on hover for user messages, outside bubble) -->
+                            <div v-if="message.role === 'user'" class="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
+                                <button type="button" @click.stop="editMessage(message)"
+                                    class="whitespace-nowrap text-xs px-2 py-1 rounded text-gray-400 dark:text-gray-500 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 transition-all"
+                                    title="Edit message">
+                                    <svg class="size-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                    </svg>
+                                    Edit
+                                </button>
+                                <button type="button" @click.stop="redoMessage(message)"
+                                    class="whitespace-nowrap text-xs px-2 py-1 rounded text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all"
+                                    title="Redo message (clears all responses after this message and re-runs it)">
+                                    <svg class="size-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                    </svg>
+                                    Redo
+                                </button>
                             </div>
                         </div>
 
+                        <div v-if="currentThread.stats && currentThread.stats.outputTokens" class="text-center text-gray-500 dark:text-gray-400 text-sm">
+                            <span :title="statsTitle(currentThread.stats)">
+                                {{ currentThread.stats.cost ? formatCost(currentThread.stats.cost) + '  for ' : '' }} {{ humanifyNumber(currentThread.stats.inputTokens) }} → {{ humanifyNumber(currentThread.stats.outputTokens) }} tokens over {{ currentThread.stats.requests }} request{{currentThread.stats.requests===1?'':'s'}} in {{ humanifyMs(currentThread.stats.duration) }}
+                            </span>
+                        </div>
+
                         <!-- Loading indicator -->
-                        <div v-if="isGenerating" class="flex items-start space-x-3">
+                        <div v-if="isGenerating" class="flex items-start space-x-3 group">
                             <!-- Avatar outside the bubble -->
                             <div class="flex-shrink-0">
-                                <div class="w-8 h-8 rounded-full bg-gray-600 text-white flex items-center justify-center text-sm font-medium">
+                                <div class="w-8 h-8 rounded-full bg-gray-600 dark:bg-gray-500 text-white flex items-center justify-center text-sm font-medium">
                                     AI
                                 </div>
                             </div>
 
                             <!-- Loading bubble -->
-                            <div class="rounded-lg px-4 py-3 bg-gray-100 border border-gray-200">
+                            <div class="rounded-lg px-4 py-3 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                                 <div class="flex space-x-1">
-                                    <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                                    <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
-                                    <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+                                    <div class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"></div>
+                                    <div class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
+                                    <div class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
                                 </div>
                             </div>
+
+                            <!-- Cancel button -->
+                            <button type="button" @click="cancelRequest"
+                                class="px-3 py-1 rounded text-sm text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 border border-transparent hover:border-red-300 dark:hover:border-red-600 transition-all"
+                                title="Cancel request">
+                                cancel
+                            </button>
                         </div>
 
                         <!-- Error message bubble -->
                         <div v-if="errorStatus" class="flex items-start space-x-3">
                             <!-- Avatar outside the bubble -->
                             <div class="flex-shrink-0">
-                                <div class="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center text-sm font-medium">
+                                <div class="w-8 h-8 rounded-full bg-red-600 dark:bg-red-500 text-white flex items-center justify-center text-sm font-medium">
                                     !
                                 </div>
                             </div>
 
                             <!-- Error bubble -->
-                            <div class="max-w-[85%] rounded-lg px-4 py-3 bg-red-50 border border-red-200 text-red-800 shadow-sm">
+                            <div class="max-w-[85%] rounded-lg px-4 py-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200 shadow-sm">
                                 <div class="flex items-start space-x-2">
                                     <div class="flex-1 min-w-0">
                                         <div class="text-base font-medium mb-1">{{ errorStatus?.errorCode || 'Error' }}</div>
                                         <div v-if="errorStatus?.message" class="text-base mb-1">{{ errorStatus.message }}</div>
-                                        <div v-if="errorStatus?.stackTrace" class="text-sm whitespace-pre-wrap break-words max-h-80 overflow-y-auto font-mono p-2 rounded">
+                                        <div v-if="errorStatus?.stackTrace" class="text-sm whitespace-pre-wrap break-words max-h-80 overflow-y-auto font-mono p-2 rounded bg-red-100 dark:bg-red-950/50">
                                             {{ errorStatus.stackTrace }}
                                         </div>
                                     </div>
                                     <button type="button"
                                         @click="errorStatus = null"
-                                        class="text-red-400 hover:text-red-600 flex-shrink-0"
+                                        class="text-red-400 dark:text-red-300 hover:text-red-600 dark:hover:text-red-100 flex-shrink-0"
                                     >
                                         <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                             <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
@@ -226,10 +277,33 @@ export default {
                         </div>
                     </div>
                 </div>
+
+                <!-- Edit message modal -->
+                <div v-if="editingMessageId" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 max-w-2xl w-full mx-4">
+                        <CloseButton @click="cancelEdit" class="" />
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Edit Message</h3>
+                        <textarea
+                            v-model="editingMessageContent"
+                            class="w-full h-40 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                            placeholder="Edit your message..."
+                        ></textarea>
+                        <div class="mt-4 flex gap-2 justify-end">
+                            <button type="button" @click="cancelEdit"
+                                class="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all">
+                                Cancel
+                            </button>
+                            <button type="button" @click="saveEditedMessage"
+                                class="px-4 py-2 rounded-md bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-600 transition-all">
+                                Save
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Input Area - only show when thread is selected -->
-            <div v-if="currentThread" class="flex-shrink-0 border-t border-gray-200 bg-white px-6 py-4">
+            <div v-if="currentThread" class="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6 py-4">
                 <ChatPrompt :model="selectedModel" :systemPrompt="currentSystemPrompt" />
             </div>
         </div>
@@ -244,7 +318,7 @@ export default {
         const { currentThread } = threads
         const chatPrompt = useChatPrompt()
         const chatSettings = useSettings()
-        const {
+        const { 
             errorStatus,
             isGenerating,
         } = chatPrompt
@@ -273,6 +347,10 @@ export default {
         const isExporting = ref(false)
         const isImporting = ref(false)
         const fileInput = ref(null)
+        const copying = ref(null)
+        const editingMessageId = ref(null)
+        const editingMessageContent = ref('')
+        const editingMessage = ref(null)
 
         // Auto-scroll to bottom when new messages arrive
         const scrollToBottom = async () => {
@@ -348,7 +426,7 @@ export default {
                 const exportData = {
                     exportedAt: new Date().toISOString(),
                     version: '1.0',
-                    source: 'ServiceStack.AI.Chat',
+                    source: 'llmspy',
                     threadCount: allThreads.length,
                     threads: allThreads
                 }
@@ -360,7 +438,7 @@ export default {
 
                 const link = document.createElement('a')
                 link.href = url
-                link.download = `aichat-threads-export-${new Date().toISOString().split('T')[0]}.json`
+                link.download = `llmsthreads-export-${new Date().toISOString().split('T')[0]}.json`
                 document.body.appendChild(link)
                 link.click()
                 document.body.removeChild(link)
@@ -369,6 +447,44 @@ export default {
             } catch (error) {
                 console.error('Failed to export threads:', error)
                 alert('Failed to export threads: ' + error.message)
+            } finally {
+                isExporting.value = false
+            }
+        }
+
+        async function exportRequests() {
+            if (isExporting.value) return
+
+            isExporting.value = true
+            try {
+                // Load all threads from IndexedDB
+                const allRequests = await threads.getAllRequests()
+
+                // Create export data with metadata
+                const exportData = {
+                    exportedAt: new Date().toISOString(),
+                    version: '1.0',
+                    source: 'llmspy',
+                    requestsCount: allRequests.length,
+                    requests: allRequests
+                }
+
+                // Create and download JSON file
+                const jsonString = JSON.stringify(exportData, null, 2)
+                const blob = new Blob([jsonString], { type: 'application/json' })
+                const url = URL.createObjectURL(blob)
+
+                const link = document.createElement('a')
+                link.href = url
+                link.download = `llmsrequests-export-${new Date().toISOString().split('T')[0]}.json`
+                document.body.appendChild(link)
+                link.click()
+                document.body.removeChild(link)
+                URL.revokeObjectURL(url)
+
+            } catch (error) {
+                console.error('Failed to export requests:', error)
+                alert('Failed to export requests: ' + error.message)
             } finally {
                 isExporting.value = false
             }
@@ -384,71 +500,94 @@ export default {
             if (!file) return
 
             isImporting.value = true
+            var importType = 'threads'
             try {
                 const text = await file.text()
                 const importData = JSON.parse(text)
-
-                // Validate import data structure
-                if (!importData.threads || !Array.isArray(importData.threads)) {
-                    throw new Error('Invalid import file: missing or invalid threads array')
-                }
+                importType = importData.threads 
+                    ? 'threads' 
+                    : importData.requests
+                        ? 'requests'
+                        : 'unknown'
 
                 // Import threads one by one
                 let importedCount = 0
-                let updatedCount = 0
+                let existingCount = 0
 
-                for (const threadData of importData.threads) {
-                    if (!threadData.id) {
-                        console.warn('Skipping thread without ID:', threadData)
-                        continue
+                const db = await threads.initDB()
+
+                if (importData.threads) {
+                    if (!Array.isArray(importData.threads)) {
+                        throw new Error('Invalid import file: missing or invalid threads array')
                     }
 
-                    try {
-                        // Check if thread already exists
-                        const existingThread = await threads.getThread(threadData.id)
+                    const threadIds = new Set(await threads.getAllThreadIds())
 
-                        if (existingThread) {
-                            // Update existing thread
-                            await threads.updateThread(threadData.id, {
-                                title: threadData.title,
-                                model: threadData.model,
-                                systemPrompt: threadData.systemPrompt,
-                                messages: threadData.messages || [],
-                                createdAt: threadData.createdAt,
-                                // Keep the existing updatedAt or use imported one
-                                updatedAt: threadData.updatedAt || existingThread.updatedAt
-                            })
-                            updatedCount++
-                        } else {
-                            // Add new thread directly to IndexedDB
-                            await threads.initDB()
-                            const db = await threads.initDB()
-                            const tx = db.transaction(['threads'], 'readwrite')
-                            await tx.objectStore('threads').add({
-                                id: threadData.id,
-                                title: threadData.title || 'Imported Chat',
-                                model: threadData.model || '',
-                                systemPrompt: threadData.systemPrompt || '',
-                                messages: threadData.messages || [],
-                                createdAt: threadData.createdAt || new Date().toISOString(),
-                                updatedAt: threadData.updatedAt || new Date().toISOString()
-                            })
-                            await tx.complete
-                            importedCount++
+                    for (const threadData of importData.threads) {
+                        if (!threadData.id) {
+                            console.warn('Skipping thread without ID:', threadData)
+                            continue
                         }
-                    } catch (error) {
-                        console.error('Failed to import thread:', threadData.id, error)
+
+                        try {
+                            // Check if thread already exists
+                            const existingThread = threadIds.has(threadData.id)
+                            if (existingThread) {
+                                existingCount++
+                            } else {
+                                // Add new thread directly to IndexedDB
+                                const tx = db.transaction(['threads'], 'readwrite')
+                                await tx.objectStore('threads').add(threadData)
+                                await tx.complete
+                                importedCount++
+                            }
+                        } catch (error) {
+                            console.error('Failed to import thread:', threadData.id, error)
+                        }
                     }
+
+                    // Reload threads to reflect changes
+                    await threads.loadThreads()
+
+                    alert(`Import completed!\nNew threads: ${importedCount}\nExisting threads: ${existingCount}`)
+                }
+                if (importData.requests) {
+                    if (!Array.isArray(importData.requests)) {
+                        throw new Error('Invalid import file: missing or invalid requests array')
+                    }
+
+                    const requestIds = new Set(await threads.getAllRequestIds())
+
+                    for (const requestData of importData.requests) {
+                        if (!requestData.id) {
+                            console.warn('Skipping request without ID:', requestData)
+                            continue
+                        }
+
+                        try {
+                            // Check if request already exists
+                            const existingRequest = requestIds.has(requestData.id)
+                            if (existingRequest) {
+                                existingCount++
+                            } else {
+                                // Add new request directly to IndexedDB
+                                const db = await threads.initDB()
+                                const tx = db.transaction(['requests'], 'readwrite')
+                                await tx.objectStore('requests').add(requestData)
+                                await tx.complete
+                                importedCount++
+                            }
+                        } catch (error) {
+                            console.error('Failed to import request:', requestData.id, error)
+                        }
+                    }
+
+                    alert(`Import completed!\nNew requests: ${importedCount}\nExisting requests: ${existingCount}`)
                 }
 
-                // Reload threads to reflect changes
-                await threads.loadThreads()
-
-                alert(`Import completed!\nNew threads: ${importedCount}\nUpdated threads: ${updatedCount}`)
-
             } catch (error) {
-                console.error('Failed to import threads:', error)
-                alert('Failed to import threads: ' + error.message)
+                console.error('Failed to import ' + importType + ':', error)
+                alert('Failed to import ' + importType + ': ' + error.message)
             } finally {
                 isImporting.value = false
                 // Clear the file input
@@ -490,6 +629,7 @@ export default {
         // Copy message content to clipboard
         const copyMessageContent = async (message) => {
             try {
+                copying.value = message
                 await navigator.clipboard.writeText(message.content)
                 // Could add a toast notification here if desired
             } catch (err) {
@@ -502,6 +642,134 @@ export default {
                 document.execCommand('copy')
                 document.body.removeChild(textArea)
             }
+            setTimeout(() => { copying.value = null }, 2000)
+        }
+
+        // Redo a user message (clear all messages after it and re-run)
+        const redoMessage = async (message) => {
+            if (!currentThread.value || message.role !== 'user') return
+
+            try {
+                const threadId = currentThread.value.id
+
+                // Clear all messages after this one
+                await threads.redoMessageFromThread(threadId, message.id)
+
+                // Extract the actual message content (remove media indicators if present)
+                let messageContent = message.content
+                // Remove media indicators like [🖼️ filename] or [🔉 filename] or [📎 filename]
+                messageContent = messageContent.replace(/\n\n\[[🖼️🔉📎] [^\]]+\]$/, '')
+
+                // Set the message text in the chat prompt
+                chatPrompt.messageText.value = messageContent
+
+                // Clear any attached files since we're re-running
+                chatPrompt.attachedFiles.value = []
+
+                // Trigger send by simulating the send action
+                // We'll use a small delay to ensure the UI updates
+                await nextTick()
+
+                // Find the send button and click it
+                const sendButton = document.querySelector('button[title*="Send"]')
+                if (sendButton && !sendButton.disabled) {
+                    sendButton.click()
+                }
+            } catch (error) {
+                console.error('Failed to redo message:', error)
+                errorStatus.value = {
+                    errorCode: 'Error',
+                    message: 'Failed to redo message: ' + error.message,
+                    stackTrace: null
+                }
+            }
+        }
+
+        // Edit a user message
+        const editMessage = (message) => {
+            if (!currentThread.value || message.role !== 'user') return
+
+            editingMessage.value = message
+            editingMessageId.value = message.id
+            // Extract the actual message content (remove media indicators if present)
+            let messageContent = message.content
+            messageContent = messageContent.replace(/\n\n\[[🖼️🔉📎] [^\]]+\]$/, '')
+            editingMessageContent.value = messageContent
+        }
+
+        // Save edited message
+        const saveEditedMessage = async () => {
+            if (!currentThread.value || !editingMessage.value || !editingMessageContent.value.trim()) return
+
+            try {
+                const threadId = currentThread.value.id
+                const messageId = editingMessage.value.id
+                const updatedContent = editingMessageContent.value
+
+                // Update the message content
+                editingMessage.value.content = updatedContent
+                await threads.updateMessageInThread(threadId, messageId, { content: updatedContent })
+
+                // Clear editing state
+                editingMessageId.value = null
+                editingMessageContent.value = ''
+                editingMessage.value = null
+
+                // Now redo the message (clear all responses after it and re-run)
+                await nextTick()
+                await threads.redoMessageFromThread(threadId, messageId)
+
+                // Set the message text in the chat prompt
+                chatPrompt.messageText.value = updatedContent
+
+                // Clear any attached files since we're re-running
+                chatPrompt.attachedFiles.value = []
+
+                // Trigger send by simulating the send action
+                await nextTick()
+
+                // Find the send button and click it
+                const sendButton = document.querySelector('button[title*="Send"]')
+                if (sendButton && !sendButton.disabled) {
+                    sendButton.click()
+                }
+            } catch (error) {
+                console.error('Failed to save edited message:', error)
+                errorStatus.value = {
+                    errorCode: 'Error',
+                    message: 'Failed to save edited message: ' + error.message,
+                    stackTrace: null
+                }
+            }
+        }
+
+        // Cancel editing
+        const cancelEdit = () => {
+            editingMessageId.value = null
+            editingMessageContent.value = ''
+            editingMessage.value = null
+        }
+
+        // Cancel pending request
+        const cancelRequest = () => {
+            chatPrompt.cancel()
+        }
+
+        function tokensTitle(usage) {
+            let title = []
+            if (usage.tokens && usage.price) {
+                const msg = parseFloat(usage.price) > 0
+                    ? `${usage.tokens} tokens @ ${usage.price} = ${tokenCost(usage.price, usage.tokens)}`
+                    : `${usage.tokens} tokens`
+                const duration = usage.duration ? ` in ${usage.duration}ms` : ''
+                title.push(msg + duration)
+            }
+            return title.join('\n')
+        }
+        const numFmt = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 6 })
+        function tokenCost(price, tokens) {
+            if (!price || !tokens) return ''
+            return numFmt.format(parseFloat(price) * tokens)
         }
 
         onMounted(() => {
@@ -522,19 +790,34 @@ export default {
             showSystemPrompt,
             messagesContainer,
             errorStatus,
+            copying,
+            editingMessageId,
+            editingMessageContent,
+            editingMessage,
             formatTime,
             renderMarkdown,
             isReasoningExpanded,
             toggleReasoning,
             formatReasoning,
             copyMessageContent,
+            redoMessage,
+            editMessage,
+            saveEditedMessage,
+            cancelEdit,
+            cancelRequest,
             configUpdated,
             exportThreads,
+            exportRequests,
             isExporting,
             triggerImport,
             handleFileImport,
             isImporting,
             fileInput,
+            tokensTitle,
+            humanifyMs,
+            humanifyNumber,
+            formatCost,
+            statsTitle,
         }
     }
 }

@@ -10,7 +10,9 @@ namespace ServiceStack.NativeTypes.TypeScript;
 
 public class TypeScriptGenerator : ILangGenerator
 {
-    public readonly MetadataTypesConfig Config;
+    public Lang Lang => Lang.TypeScript;
+    public MetadataTypesConfig Config { get; }
+
     readonly NativeTypesFeature feature;
     public List<string> ConflictTypeNames = new();
     public List<MetadataType> AllTypes { get; set; }
@@ -196,11 +198,12 @@ public class TypeScriptGenerator : ILangGenerator
 
     public string GetCode(MetadataTypes metadata, IRequest request, INativeTypesMetadata nativeTypes)
     {
+        var formatter = request.TryResolve<INativeTypesFormatter>();
         Init(metadata);
 
-        var defaultImports = !Config.DefaultImports.IsEmpty()
+        List<string> defaultImports = new(!Config.DefaultImports.IsEmpty()
             ? Config.DefaultImports
-            : DefaultImports;
+            : DefaultImports);
 
         var globalNamespace = Config.GlobalNamespace;
 
@@ -216,12 +219,8 @@ public class TypeScriptGenerator : ILangGenerator
             sb.AppendLine("Version: {0}".Fmt(Env.VersionString));
             sb.AppendLine("Tip: {0}".Fmt(HelpMessages.NativeTypesDtoOptionsTip.Fmt("//")));
             sb.AppendLine("BaseUrl: {0}".Fmt(Config.BaseUrl));
-            if (Config.UsePath != null)
-                sb.AppendLine("UsePath: {0}".Fmt(Config.UsePath));
-
             sb.AppendLine();
             sb.AppendLine("{0}GlobalNamespace: {1}".Fmt(defaultValue("GlobalNamespace"), Config.GlobalNamespace));
-
             sb.AppendLine("{0}MakePropertiesOptional: {1}".Fmt(defaultValue("MakePropertiesOptional"), Config.MakePropertiesOptional));
             sb.AppendLine("{0}AddServiceStackTypes: {1}".Fmt(defaultValue("AddServiceStackTypes"), Config.AddServiceStackTypes));
             sb.AppendLine("{0}AddResponseStatus: {1}".Fmt(defaultValue("AddResponseStatus"), Config.AddResponseStatus));
@@ -235,6 +234,8 @@ public class TypeScriptGenerator : ILangGenerator
             sb.AppendLine("*/");
             sb.AppendLine();
         }
+
+        formatter?.AddHeader(sb, this, request);
 
         var header = AddHeader?.Invoke(request);
         if (!string.IsNullOrEmpty(header))
@@ -354,8 +355,9 @@ public class TypeScriptGenerator : ILangGenerator
         }
             
         sb.AppendLine(); //tslint
-
-        return StringBuilderCache.ReturnAndFree(sbInner);
+        
+        var ret = StringBuilderCache.ReturnAndFree(sbInner);
+        return formatter != null ? formatter.Transform(ret, this, request) : ret;
     }
 
     private string AppendType(ref StringBuilderWrapper sb, MetadataType type, string lastNS,

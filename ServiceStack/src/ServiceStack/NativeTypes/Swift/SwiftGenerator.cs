@@ -11,7 +11,9 @@ namespace ServiceStack.NativeTypes.Swift;
 
 public class SwiftGenerator : ILangGenerator
 {
-    readonly MetadataTypesConfig Config;
+    public Lang Lang => Lang.Swift;
+    public MetadataTypesConfig Config { get; }
+
     readonly NativeTypesFeature feature;
     List<MetadataType> allTypes;
     List<string> conflictTypeNames = new();
@@ -127,6 +129,7 @@ public class SwiftGenerator : ILangGenerator
 
     public string GetCode(MetadataTypes metadata, IRequest request, INativeTypesMetadata nativeTypes)
     {
+        var formatter = request.TryResolve<INativeTypesFormatter>();
         var typeNamespaces = new HashSet<string>();
         var includeList = RemoveIgnoredTypes(metadata);
         metadata.Types.Each(x => typeNamespaces.Add(x.Namespace));
@@ -150,11 +153,7 @@ public class SwiftGenerator : ILangGenerator
             sb.AppendLine("Version: {0}".Fmt(Env.VersionString));
             sb.AppendLine("Tip: {0}".Fmt(HelpMessages.NativeTypesDtoOptionsTip.Fmt("//")));
             sb.AppendLine("BaseUrl: {0}".Fmt(Config.BaseUrl));
-            if (Config.UsePath != null)
-                sb.AppendLine("UsePath: {0}".Fmt(Config.UsePath));
-
             sb.AppendLine();
-
             sb.AppendLine("{0}BaseClass: {1}".Fmt(defaultValue("BaseClass"), Config.BaseClass));
             sb.AppendLine("{0}AddModelExtensions: {1}".Fmt(defaultValue("AddModelExtensions"), Config.AddModelExtensions));
             sb.AppendLine("{0}AddServiceStackTypes: {1}".Fmt(defaultValue("AddServiceStackTypes"), Config.AddServiceStackTypes));
@@ -173,6 +172,8 @@ public class SwiftGenerator : ILangGenerator
             sb.AppendLine("*/");
             sb.AppendLine();
         }
+
+        formatter?.AddHeader(sb, this, request);
 
         var header = AddHeader?.Invoke(request);
         if (!string.IsNullOrEmpty(header))
@@ -290,8 +291,9 @@ public class SwiftGenerator : ILangGenerator
         var addCode = AddCodeFilter?.Invoke(allTypes, Config);
         if (addCode != null)
             sb.AppendLine(addCode);
-
-        return StringBuilderCache.ReturnAndFree(sbInner);
+        
+        var ret = StringBuilderCache.ReturnAndFree(sbInner);
+        return formatter != null ? formatter.Transform(ret, this, request) : ret;
     }
 
     private List<string> RemoveIgnoredTypes(MetadataTypes metadata)

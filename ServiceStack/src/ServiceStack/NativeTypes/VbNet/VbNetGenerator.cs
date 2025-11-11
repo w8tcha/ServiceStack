@@ -11,7 +11,9 @@ namespace ServiceStack.NativeTypes.VbNet;
 
 public class VbNetGenerator : ILangGenerator
 {
-    readonly MetadataTypesConfig Config;
+    public Lang Lang => Lang.Vb;
+    public MetadataTypesConfig Config { get; }
+
     readonly NativeTypesFeature feature;
     private List<MetadataType> allTypes;
 
@@ -223,6 +225,7 @@ public class VbNetGenerator : ILangGenerator
 
     public string GetCode(MetadataTypes metadata, IRequest request, INativeTypesMetadata nativeTypes)
     {
+        var formatter = request.TryResolve<INativeTypesFormatter>();
         var namespaces = Config.GetDefaultNamespaces(metadata);
 
         metadata.RemoveIgnoredTypesForNet(Config);
@@ -253,9 +256,6 @@ public class VbNetGenerator : ILangGenerator
             sb.AppendLine("'Version: {0}".Fmt(Env.VersionString));
             sb.AppendLine("'Tip: {0}".Fmt(HelpMessages.NativeTypesDtoOptionsTip.Fmt("''")));
             sb.AppendLine("'BaseUrl: {0}".Fmt(Config.BaseUrl));
-            if (Config.UsePath != null)
-                sb.AppendLine("'UsePath: {0}".Fmt(Config.UsePath));
-
             sb.AppendLine("'");
             sb.AppendLine("{0}GlobalNamespace: {1}".Fmt(defaultValue("GlobalNamespace"), Config.GlobalNamespace));
             sb.AppendLine("{0}MakePartial: {1}".Fmt(defaultValue("MakePartial"), Config.MakePartial));
@@ -277,6 +277,8 @@ public class VbNetGenerator : ILangGenerator
             AddQueryParamOptions.Each(name => sb.AppendLine($"{defaultValue(name)}{name}: {request.QueryString[name]}"));
             sb.AppendLine();
         }
+
+        formatter?.AddHeader(sb, this, request);
 
         var header = AddHeader?.Invoke(request);
         if (!string.IsNullOrEmpty(header))
@@ -400,8 +402,9 @@ public class VbNetGenerator : ILangGenerator
         sb.AppendLine("End Namespace");
 
         sb.AppendLine();
-
-        return StringBuilderCache.ReturnAndFree(sbInner);
+        
+        var ret = StringBuilderCache.ReturnAndFree(sbInner);
+        return formatter != null ? formatter.Transform(ret, this, request) : ret;
     }
 
     private string AppendType(ref StringBuilderWrapper sb, MetadataType type, string lastNS, List<MetadataType> allTypes, CreateTypeOptions options)

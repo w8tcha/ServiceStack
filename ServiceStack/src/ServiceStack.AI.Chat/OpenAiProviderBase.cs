@@ -6,6 +6,7 @@ namespace ServiceStack.AI;
 
 public abstract class OpenAiProviderBase(ILogger log, IHttpClientFactory factory) : IChatClient
 {
+    public string Id { get; set; }
     public string BaseUrl { get; set; }
     public string? ChatUrl { get; set; }
     public string? ApiKey { get; set; }
@@ -30,6 +31,8 @@ public abstract class OpenAiProviderBase(ILogger log, IHttpClientFactory factory
     public double? TopP { get; set; }
     public string? Verbosity { get; set; }
     public bool? EnableThinking { get; set; }
+    public ModelPrice DefaultPricing { get; set; }
+    public Dictionary<string, ModelPrice> Pricing { get; set; } = [];
     
     public ILogger Log { get; set; } = log;
     public IHttpClientFactory Factory { get; set; } = factory;
@@ -174,6 +177,40 @@ public abstract class OpenAiProviderBase(ILogger log, IHttpClientFactory factory
         {
             EnableThinking = enableThinking;
         }
+        if (definition.TryGetObject("pricing", out Dictionary<string, object?> pricing))
+        {
+            Pricing = new();
+            foreach (var entry in pricing)
+            {
+                if (entry.Value is Dictionary<string, object?> modelPrice)
+                {
+                    Pricing[entry.Key] = new ModelPrice
+                    {
+                        Input = modelPrice.GetValueOrDefault("input") as string,
+                        Output = modelPrice.GetValueOrDefault("output") as string,
+                    };
+                }
+            }
+        }
+        if (definition.TryGetObject("default_pricing", out var defaultPricing))
+        {
+            DefaultPricing = new ModelPrice
+            {
+                Input = defaultPricing.GetValueOrDefault("input") as string,
+                Output = defaultPricing.GetValueOrDefault("output") as string,
+            };
+        }
+    }
+    
+    public string? GetProviderModel(string model)
+    {
+        return Models.GetValueOrDefault(model);
+    }
+    
+    public ModelPrice? GetModelPricing(string model)
+    {
+        var providerModel = GetProviderModel(model) ?? model;
+        return Pricing.GetValueOrDefault(providerModel, DefaultPricing);
     }
     
     public virtual Task LoadAsync(CancellationToken token=default) => Task.CompletedTask;
@@ -379,6 +416,17 @@ public abstract class OpenAiProviderBase(ILogger log, IHttpClientFactory factory
             }
         }
     }
+    public virtual ChatResponse ToResponse(ChatResponse response, ChatCompletion chat, DateTime startedAt)
+    {
+        response.Metadata ??= new();
+        response.Metadata["duration"] = ((long)(DateTime.UtcNow - startedAt).TotalMilliseconds).ToString();
+        var pricing = GetModelPricing(chat.Model);
+        if (pricing is { Input: not null, Output: not null })
+        {
+            response.Metadata["pricing"] = $"{pricing.Input}/{pricing.Output}";
+        }
+        return response;
+    }
 
     public virtual async Task<ChatResponse> ChatAsync(ChatCompletion request, CancellationToken token=default)
     {
@@ -391,13 +439,24 @@ public abstract class OpenAiProviderBase(ILogger log, IHttpClientFactory factory
             Log.LogDebug("POST {ChatUrl}\n{Request}", ChatUrl, ChatSummaryJson(request));
 
         var httpReq = new HttpRequestMessage(HttpMethod.Post, ChatUrl);
+
+        // Conflict's with some providers Z.ai
+        var hold = request.Metadata;
+        request.Metadata = null;
+
         var jsonRequest = request.ToJson();
         httpReq.Content = new StringContent(jsonRequest);
+
+        request.Metadata = hold;
+
         foreach (var entry in Headers)
         {
             httpReq.WithHeader(entry.Key, entry.Value);
         }
+
+        var startedAt = DateTime.UtcNow;
         var httpRes = await client.SendAsync(httpReq, token).ConfigAwait();
+
         var json = await httpRes.Content.ReadAsStringAsync(token).ConfigAwait();
         if (!httpRes.IsSuccessStatusCode)
         {
@@ -415,6 +474,19 @@ public abstract class OpenAiProviderBase(ILogger log, IHttpClientFactory factory
         if (Log.IsEnabled(LogLevel.Debug))
             Log.LogDebug("Response:\n{Response}", ClientConfig.ToSystemJson(dto));
 
-        return dto;
+        return ToResponse(dto, request, startedAt);
+    }
+
+    public virtual string? GetModelId(string providerModel)
+    {
+        foreach (var entry in Models)
+        {
+            if (entry.Value == providerModel)
+            {
+                log.LogDebug("USING model ID: {Model} for {ProviderModel} in {Provider}", entry.Key, providerModel, Id);
+                return entry.Key;
+            }
+        }
+        return null;
     }
 }

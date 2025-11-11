@@ -22,14 +22,14 @@ namespace ServiceStack;
 
 public partial class DbJobs : IBackgroundJobs
 {
-    readonly ILogger<DbJobs> log;
-    readonly DatabaseJobFeature feature;
-    private IServiceProvider services;
-    readonly IServiceScopeFactory scopeFactory;
+    private readonly ILogger<DbJobs> log;
+    private readonly DatabaseJobFeature feature;
+    private readonly IServiceProvider services;
+    private readonly IServiceScopeFactory scopeFactory;
     private ConcurrentDictionary<string, int> lastCommandDurations = new();
     private ConcurrentDictionary<string, int> lastApiDurations = new();
-    ConcurrentDictionary<string, DbJobsWorker> workers = new();
-    static ConcurrentQueue<BackgroundJobStatusUpdate> updates = new();
+    private ConcurrentDictionary<string, DbJobsWorker> workers = new();
+    private static ConcurrentQueue<BackgroundJobStatusUpdate> updates = new();
     string Table;
     Columns columns;
     private long ticks = 0;
@@ -156,7 +156,7 @@ public partial class DbJobs : IBackgroundJobs
         options ??= new();
         var origOnSuccess = options?.OnSuccess;
         var origOnFailed = options?.OnFailed;
-        options.OnSuccess = r =>
+        options!.OnSuccess = r =>
         {
             origOnSuccess?.Invoke(r);
             tcs.SetResult(r);
@@ -988,7 +988,7 @@ public partial class DbJobs : IBackgroundJobs
                 .GroupBy(x => new { x.Command, x.Worker })
                 .Select(x => new {
                     Command = Sql.Custom($"CASE WHEN {columns.Worker} is null THEN {columns.Command} ELSE {sqlCommandWorker} END"), 
-                    DurationMs = Sql.Sum(columns.DurationMs),
+                    DurationMs = Sql.Custom($"CASE WHEN SUM({columns.DurationMs}) > {int.MaxValue} THEN {int.MaxValue} ELSE SUM({columns.DurationMs}) END"),
                 }));
         lastCommandDurations = new(commandDurations);
         
@@ -1004,7 +1004,7 @@ public partial class DbJobs : IBackgroundJobs
                 .GroupBy(x => new { x.Command, x.Worker })
                 .Select(x => new {
                     Command = Sql.Custom($"CASE WHEN {columns.Worker} is null THEN {columns.Command} ELSE {sqlCommandWorker} END"), 
-                    DurationMs = Sql.Sum(columns.DurationMs),
+                    DurationMs = Sql.Custom($"CASE WHEN SUM({columns.DurationMs}) > {int.MaxValue} THEN {int.MaxValue} ELSE SUM({columns.DurationMs}) END"),
                 }));
         lastApiDurations = new(apiDurations);
 

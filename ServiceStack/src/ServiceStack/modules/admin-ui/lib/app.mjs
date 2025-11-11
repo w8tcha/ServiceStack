@@ -1,6 +1,7 @@
 import { reactive } from "vue"
 import { JsonServiceClient, map, lastLeftPart, trimEnd, queryString, enc, sanitize, } from "@servicestack/client"
 import ServiceStackVue, { useMetadata, useAuth, useConfig, useUtils } from "@servicestack/vue"
+import hljs from "highlight.js"
 import { App, usePageRoutes, useBreakpoints, setBodyClass, sortOps } from "core"
 import { Authenticate } from "./dtos.mjs"
 const { setConfig } = useConfig()
@@ -87,7 +88,7 @@ export let routes = usePageRoutes(app, {
     page:'admin',
     queryKeys: ('tab,provider,db,schema,table,q,page,sort,new,edit,op,skip,' +
         'show,orderBy,operationName,userAuthId,sessionId,pathInfo,ipAddress,referer,forwardedFor,hasResponse,withErrors,' +
-        'source,threadId,eventType,traceId,userId,tag,body,type,dialog,period,year,month,ip,apiKey,apiKeyId').split(','),
+        'source,threadId,eventType,traceId,userId,tag,body,type,dialog,period,year,month,day,ip,apiKey,apiKeyId').split(','),
     handlers: {
         nav(state) { console.debug('nav', state) } /*debug*/
     },
@@ -316,7 +317,7 @@ app.directive('highlightjs', (el, binding) => {
     if (binding.value) {
         //el.className = ''
         el.innerHTML = enc(binding.value)
-        globalThis.hljs.highlightElement(el)
+        hljs.highlightElement(el)
     }
 })
 setConfig({

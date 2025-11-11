@@ -7,13 +7,17 @@ using ServiceStack.Jobs;
 using ServiceStack.NativeTypes.CSharp;
 using ServiceStack.NativeTypes.Dart;
 using ServiceStack.NativeTypes.FSharp;
+using ServiceStack.NativeTypes.Go;
 using ServiceStack.NativeTypes.Java;
 using ServiceStack.NativeTypes.Kotlin;
 using ServiceStack.NativeTypes.Php;
 using ServiceStack.NativeTypes.Python;
+using ServiceStack.NativeTypes.Ruby;
+using ServiceStack.NativeTypes.Rust;
 using ServiceStack.NativeTypes.Swift;
 using ServiceStack.NativeTypes.TypeScript;
 using ServiceStack.NativeTypes.VbNet;
+using ServiceStack.NativeTypes.Zig;
 using ServiceStack.Web;
 
 namespace ServiceStack.NativeTypes;
@@ -72,6 +76,22 @@ public class TypesKotlin : NativeTypesBase, IGet, IReturn<string> { }
 [ExcludeMetadata]
 [Route("/types/python")]
 public class TypesPython : NativeTypesBase, IGet, IReturn<string> { }
+
+[ExcludeMetadata]
+[Route("/types/ruby")]
+public class TypesRuby : NativeTypesBase, IGet, IReturn<string> { }
+
+[ExcludeMetadata]
+[Route("/types/go")]
+public class TypesGo : NativeTypesBase, IGet, IReturn<string> { }
+
+[ExcludeMetadata]
+[Route("/types/rust")]
+public class TypesRust : NativeTypesBase, IGet, IReturn<string> { }
+
+[ExcludeMetadata]
+[Route("/types/zig")]
+public class TypesZig : NativeTypesBase, IGet, IReturn<string> { }
 
 [ExcludeMetadata]
 [Route("/types/js")]
@@ -169,6 +189,10 @@ public class NativeTypesService(INativeTypesMetadata metadata) : Service
             ["Kotlin"] = new TypesKotlin().ToAbsoluteUri(Request),
             ["Swift"] = new TypesSwift().ToAbsoluteUri(Request),
             ["Python"] = new TypesPython().ToAbsoluteUri(Request),
+            ["Ruby"] = new TypesRuby().ToAbsoluteUri(Request),
+            ["Go"] = new TypesGo().ToAbsoluteUri(Request),
+            ["Rust"] = new TypesRust().ToAbsoluteUri(Request),
+            ["Zig"] = new TypesZig().ToAbsoluteUri(Request),
         };
         foreach (var linksFilter in TypeLinksFilters)
         {
@@ -376,6 +400,130 @@ public class NativeTypesService(INativeTypesMetadata metadata) : Service
         return gen;
     }
 
+    [AddHeader(ContentType = MimeTypes.PlainText)]
+    public object Any(TypesRuby request)
+    {
+        request.BaseUrl = GetBaseUrl(request.BaseUrl);
+
+        var typesConfig = metadata.GetConfig(request);
+        typesConfig.MakePropertiesOptional = request.MakePropertiesOptional ?? false;
+        typesConfig.ExportAsTypes = true;
+            
+        var metadataTypes = ResolveMetadataTypes(typesConfig);
+
+        if (!RubyGenerator.GenerateServiceStackTypes)
+        {
+            var ignoreLibraryTypes = ReturnInterfaces.Map(x => x.Name);
+            ignoreLibraryTypes.AddRange(BuiltinInterfaces.Select(x => x.Name));
+            ignoreLibraryTypes.AddRange(BuiltInClientDtos.Select(x => x.Name));
+
+            metadataTypes.Operations.RemoveAll(x => ignoreLibraryTypes.Contains(x.Request.Name));
+            metadataTypes.Operations.Each(x => {
+                if (x.Response != null && ignoreLibraryTypes.Contains(x.Response.Name))
+                {
+                    x.Response = null;
+                }
+            });
+            metadataTypes.Types.RemoveAll(x => ignoreLibraryTypes.Contains(x.Name));
+        }
+
+        var gen = new RubyGenerator(typesConfig).GetCode(metadataTypes, base.Request, metadata);
+        return gen;
+    }
+
+    [AddHeader(ContentType = MimeTypes.PlainText)]
+    public object Any(TypesGo request)
+    {
+        request.BaseUrl = GetBaseUrl(request.BaseUrl);
+
+        var typesConfig = metadata.GetConfig(request);
+        typesConfig.MakePropertiesOptional = request.MakePropertiesOptional ?? false;
+        typesConfig.ExportAsTypes = true;
+            
+        var metadataTypes = ResolveMetadataTypes(typesConfig);
+
+        if (!GoGenerator.GenerateServiceStackTypes)
+        {
+            var ignoreLibraryTypes = ReturnInterfaces.Map(x => x.Name);
+            ignoreLibraryTypes.AddRange(BuiltinInterfaces.Select(x => x.Name));
+            ignoreLibraryTypes.AddRange(BuiltInClientDtos.Select(x => x.Name));
+
+            metadataTypes.Operations.RemoveAll(x => ignoreLibraryTypes.Contains(x.Request.Name));
+            metadataTypes.Operations.Each(x => {
+                if (x.Response != null && ignoreLibraryTypes.Contains(x.Response.Name))
+                {
+                    x.Response = null;
+                }
+            });
+            metadataTypes.Types.RemoveAll(x => ignoreLibraryTypes.Contains(x.Name));
+        }
+
+        var gen = new GoGenerator(typesConfig).GetCode(metadataTypes, base.Request, metadata);
+        return gen;
+    }
+
+    [AddHeader(ContentType = MimeTypes.PlainText)]
+    public object Any(TypesRust request)
+    {
+        request.BaseUrl = GetBaseUrl(request.BaseUrl);
+
+        var typesConfig = metadata.GetConfig(request);
+        typesConfig.MakePropertiesOptional = request.MakePropertiesOptional ?? false;
+        typesConfig.ExportAsTypes = true;
+            
+        var metadataTypes = ResolveMetadataTypes(typesConfig);
+
+        if (!RustGenerator.GenerateServiceStackTypes)
+        {
+            var ignoreLibraryTypes = ReturnInterfaces.Map(x => x.Name);
+            ignoreLibraryTypes.AddRange(BuiltinInterfaces.Select(x => x.Name));
+            ignoreLibraryTypes.AddRange(BuiltInClientDtos.Select(x => x.Name));
+
+            metadataTypes.Operations.RemoveAll(x => ignoreLibraryTypes.Contains(x.Request.Name));
+            metadataTypes.Operations.Each(x => {
+                if (x.Response != null && ignoreLibraryTypes.Contains(x.Response.Name))
+                {
+                    x.Response = null;
+                }
+            });
+            metadataTypes.Types.RemoveAll(x => ignoreLibraryTypes.Contains(x.Name));
+        }
+
+        var gen = new RustGenerator(typesConfig).GetCode(metadataTypes, base.Request, metadata);
+        return gen;
+    }
+
+    [AddHeader(ContentType = MimeTypes.PlainText)]
+    public object Any(TypesZig request)
+    {
+        request.BaseUrl = GetBaseUrl(request.BaseUrl);
+
+        var typesConfig = metadata.GetConfig(request);
+        typesConfig.MakePropertiesOptional = request.MakePropertiesOptional ?? false;
+        typesConfig.ExportAsTypes = true;
+            
+        var metadataTypes = ResolveMetadataTypes(typesConfig);
+
+        if (!ZigGenerator.GenerateServiceStackTypes)
+        {
+            var ignoreLibraryTypes = ReturnInterfaces.Map(x => x.Name);
+            ignoreLibraryTypes.AddRange(BuiltinInterfaces.Select(x => x.Name));
+            ignoreLibraryTypes.AddRange(BuiltInClientDtos.Select(x => x.Name));
+
+            metadataTypes.Operations.RemoveAll(x => ignoreLibraryTypes.Contains(x.Request.Name));
+            metadataTypes.Operations.Each(x => {
+                if (x.Response != null && ignoreLibraryTypes.Contains(x.Response.Name))
+                {
+                    x.Response = null;
+                }
+            });
+            metadataTypes.Types.RemoveAll(x => ignoreLibraryTypes.Contains(x.Name));
+        }
+
+        var gen = new ZigGenerator(typesConfig).GetCode(metadataTypes, base.Request, metadata);
+        return gen;
+    }
+    
     [AddHeader(ContentType = MimeTypes.PlainText)]
     public object Any(TypesDart request)
     {

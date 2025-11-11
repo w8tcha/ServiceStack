@@ -11,13 +11,18 @@ public enum Lang
     FSharp =     1 << 1,
     Vb =         1 << 2,
     TypeScript = 1 << 3,
-    Dart =       1 << 4,
-    Swift =      1 << 5,
-    Java =       1 << 6,
-    Kotlin =     1 << 7,
-    Python =     1 << 8,
-    Go =         1 << 9,
-    Php =        1 << 10,
+    JavaScript = 1 << 4,
+    CommonJs =   1 << 5,
+    Dart =       1 << 6,
+    Swift =      1 << 7,
+    Java =       1 << 8,
+    Kotlin =     1 << 9,
+    Python =     1 << 10,
+    Go =         1 << 11,
+    Php =        1 << 12,
+    Ruby =       1 << 13,
+    Rust =       1 << 14,
+    Zig =        1 << 15,
 }
     
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = true)]
@@ -53,3 +58,11 @@ public class EmitKotlin(params string[] statements) : EmitCodeAttribute(Lang.Kot
 public class EmitPython(params string[] statements) : EmitCodeAttribute(Lang.Python, statements);
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = true)]
 public class EmitPhp(params string[] statements) : EmitCodeAttribute(Lang.Php, statements);
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = true)]
+public class EmitGo(params string[] statements) : EmitCodeAttribute(Lang.Go, statements);
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = true)]
+public class EmitRuby(params string[] statements) : EmitCodeAttribute(Lang.Ruby, statements);
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = true)]
+public class EmitRust(params string[] statements) : EmitCodeAttribute(Lang.Rust, statements);
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = true)]
+public class EmitZig(params string[] statements) : EmitCodeAttribute(Lang.Zig, statements);

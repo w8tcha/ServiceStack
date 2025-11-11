@@ -6,8 +6,10 @@ using ServiceStack.Admin;
 using ServiceStack.AI;
 using ServiceStack.AspNetCore.OpenApi;
 using ServiceStack.Configuration;
+using ServiceStack.Data;
 using ServiceStack.HtmlModules;
 using ServiceStack.IO;
+using ServiceStack.OrmLite;
 using Swashbuckle.AspNetCore.SwaggerGen;
 using TalentBlazor.ServiceModel;
 using GetAccessTokenResponse = ServiceStack.GetAccessTokenResponse;
@@ -18,7 +20,7 @@ namespace MyApp;
 
 public class AppHost() : AppHostBase("My App"), IHostingStartup
 {
-    public static string TalentBlazorDir = "../../../../../netcore/TalentBlazor/TalentBlazor";
+    public static string TalentBlazorDir = "../../../../../NetCoreApps/TalentBlazor/TalentBlazor";
     public static string TalentBlazorSeedDataDir = TalentBlazorDir + "/Migrations/seed";
     public static string TalentBlazorWwwRootDir = TalentBlazorDir + "/wwwroot";
     public static string ProfilesDir = $"{TalentBlazorWwwRootDir}/profiles";
@@ -91,14 +93,6 @@ public class AppHost() : AppHostBase("My App"), IHostingStartup
                     }
                     return null;
                 };
-            });
-            
-            services.AddPlugin(new ChatFeature {
-                ConfigJson = vfs.GetFile("wwwroot/chat/llms.json").ReadAllText(),
-                ValidateRequest = async req => null,
-                // EnableProviders = [
-                //     "ollama"
-                // ]
             });
         });
 

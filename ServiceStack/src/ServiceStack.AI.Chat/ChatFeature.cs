@@ -1,11 +1,8 @@
-using System.Net;
-using System.Security.Claims;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
-using ServiceStack.Auth;
+using Microsoft.Extensions.Logging.Abstractions;
 using ServiceStack.Configuration;
-using ServiceStack.DataAnnotations;
 using ServiceStack.IO;
 using ServiceStack.Text;
 using ServiceStack.Web;
@@ -30,6 +27,11 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
         set => UiConfig = (Dictionary<string, object>)JSON.parse(value);
     }
 
+    public List<Type> ExcludeRequestDtoTypes { get; set; } =
+    [
+        typeof(ChatStaticFile)
+    ];
+    
     public List<string> EnableProviders { get; set; } = [];
 
     public Dictionary<string, string> Variables { get; set; } = [];
@@ -43,12 +45,23 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
     /// </summary>
     public IVirtualFiles? VirtualFiles { get; set; }
     
+    public IChatStore? ChatStore { get; set; }
+    
     /// <summary>
     /// How to download embedded URLs
     /// </summary>
     public Func<OpenAiProviderBase, string, Task<(string base64, string mimeType)>>? DownloadUrlAsBase64Async { get; set; }
     
     public Action<string>? ValidateUrl { get; set; }
+
+    /// <summary>
+    /// Default take, if none is specified
+    /// </summary>
+    public int DefaultLimit { get; set; } = 100;
+
+    public bool AutoInitSchema { get; set; } = true;
+    
+    public bool DisableAdminUi { get; set; }
 
     public ChatFeature()
     {
@@ -70,12 +83,16 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
         var provider = Providers.GetValueOrDefault(providerId);
         if (provider == null)
             throw new ArgumentException($"Chat Provider '{providerId}' is not available");
+        provider.Id = providerId;
         return (T)provider;
     }
     public OpenAiProvider GetOpenAiProvider(string providerId) => GetRequiredProvider<OpenAiProvider>(providerId);
     public OllamaProvider GetOllamaProvider(string providerId) => GetRequiredProvider<OllamaProvider>(providerId);
     public GoogleProvider GetGoogleProvider(string providerId) => GetRequiredProvider<GoogleProvider>(providerId);
 
+    public static string SvgIcon =
+        "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path fill='currentColor' d='M14 5H4v13.385L5.763 17H20v-6h2v7a1 1 0 0 1-1 1H6.454L2 22.5V4a1 1 0 0 1 1-1h11zm5.53-3.68a.507.507 0 0 1 .94 0l.254.61a4.37 4.37 0 0 0 2.25 2.327l.717.32a.53.53 0 0 1 0 .962l-.758.338a4.36 4.36 0 0 0-2.22 2.25l-.246.566a.506.506 0 0 1-.934 0l-.247-.565a4.36 4.36 0 0 0-2.219-2.251l-.76-.338a.53.53 0 0 1 0-.963l.718-.32a4.37 4.37 0 0 0 2.251-2.325z'/></svg>";
+    
     public void Configure(IServiceCollection services)
     {
         services.RegisterService<ChatServices>();
@@ -83,6 +100,28 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
             new ChatClients(c.GetRequiredService<ILogger<ChatClients>>(), this));
         services.TryAddSingleton<IChatClient>(c => 
             c.GetRequiredService<IChatClients>());
+
+        if (!DisableAdminUi)
+        {
+            services.RegisterService<AdminChatServices>();
+            services.ConfigurePlugin<UiFeature>(feature =>
+            {
+                feature.AddAdminLink(AdminUiFeature.Dynamic, new LinkInfo {
+                    Id = "chat",
+                    Label = "AI Chat",
+                    Icon = Svg.ImageSvg(SvgIcon),
+                    Show = $"role:{RoleNames.Admin}",
+                });
+                feature.AddAdminComponent("chat", "AdminChat");
+            });
+        }
+        if (ExcludeRequestDtoTypes.Count > 0)
+        {
+            services.ConfigurePlugin<RequestLogsFeature>(feature =>
+            {
+                feature.ExcludeRequestDtoTypes.AddDistinctRange(ExcludeRequestDtoTypes);
+            });
+        }
     }
     
     public ILogger<ChatFeature> Log { get; set; }
@@ -92,6 +131,7 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
         Services ??= appHost.GetApplicationServices() ?? throw new ArgumentNullException(nameof(Services));
         HttpClientFactory ??= Services.GetRequiredService<IHttpClientFactory>();
         Log ??= Services.GetRequiredService<ILogger<ChatFeature>>();
+        ChatStore ??= Services.GetService<IChatStore>();
 
         if (Services.GetService<IApiKeySource>() == null || Services.GetService<IApiKeyResolver>() == null)
             throw new Exception("API Keys are required to use ChatFeature");
@@ -127,6 +167,14 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
         }
         
         appHost.ScriptContext.Args[nameof(Chat)] = new Chat(this);
+
+        if (ChatStore != null)
+        {
+            if (AutoInitSchema)
+            {
+                ChatStore.InitSchema();
+            }
+        }
     }
     
     public class Chat(ChatFeature feature)
@@ -191,6 +239,7 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
                 };
                 if (p != null)
                 {
+                    p.Id = entry.Key;
                     p.VirtualFiles = VirtualFiles;
                     p.DownloadUrlAsBase64Async = DownloadUrlAsBase64Async;
                     Providers[entry.Key] = p;
@@ -299,8 +348,8 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
     }
 
     public Func<ChatCompletion, IRequest, Task<ChatResponse>> ChatCompletionAsync { get; set; }
-    public Func<ChatCompletion, ChatResponse, IRequest, Task>? OnChatCompletionSuccessAsync { get; set; }
-    public Func<ChatCompletion, Exception, IRequest, Task>? OnChatCompletionFailedAsync { get; set; }
+    public Func<OpenAiProviderBase, ChatCompletion, ChatResponse, IRequest, Task>? OnChatCompletionSuccessAsync { get; set; }
+    public Func<OpenAiProviderBase, ChatCompletion, Exception, IRequest, Task>? OnChatCompletionFailedAsync { get; set; }
 
     public async Task<ChatResponse> DefaultChatCompletionAsync(ChatCompletion request, IRequest req)
     {
@@ -313,6 +362,7 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
         }
 
         Exception? firstEx = null;
+        OpenAiProviderBase? firstProvider = null;
         var i = 0;
         var chatRequest = request;
         foreach (var entry in candidateProviders)
@@ -323,9 +373,11 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
                 var provider = entry.Value;
                 chatRequest.Model = request.Model;
                 var ret = await provider.ChatAsync(chatRequest).ConfigAwait();
+                if (ChatStore != null)
+                    await ChatStore.ChatCompletedAsync(provider, chatRequest, ret, req).ConfigAwait();
                 var onSuccess = OnChatCompletionSuccessAsync;
                 if (onSuccess != null)
-                    await onSuccess(chatRequest, ret, req).ConfigAwait();
+                    await onSuccess(provider, chatRequest, ret, req).ConfigAwait();
                 return ret;
             }
             catch (Exception ex)
@@ -333,13 +385,18 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
                 Log.LogError(ex, "Error calling {Name} ({CandidateIndex}/{CandidatesTotal}): {Message}", 
                     i, candidateProviders.Count, entry.Key, ex.Message);
                 firstEx ??= ex;
+                firstProvider ??= entry.Value;
             }
         }
 
         firstEx ??= HttpError.NotFound($"Model {request.Model} not found");
+        firstProvider ??= new OpenAiProvider(NullLogger.Instance, HttpClientFactory) { Id = "unknown" };
+        
+        if (ChatStore != null)
+            await ChatStore.ChatFailedAsync(firstProvider, chatRequest, firstEx, req).ConfigAwait();
         var onFailed = OnChatCompletionFailedAsync; 
         if (onFailed != null)
-            await onFailed(request, firstEx, req).ConfigAwait();
+            await onFailed(firstProvider, request, firstEx, req).ConfigAwait();
         throw firstEx;
     }
 
@@ -351,250 +408,5 @@ public class ChatFeature : IPlugin, Model.IHasStringId, IConfigureServices, IPre
         if (candidateProviders.Count == 0)
             throw HttpError.NotFound($"Model {request.Model} not found");
         return candidateProviders;
-    }
-}
-
-[ExcludeMetadata, Route("/chat/models")]
-public class ChatModels : IGet, IReturn<string[]>
-{
-}
-
-[ExcludeMetadata, Route("/chat/config")]
-public class ChatConfig : IGet, IReturn<string>
-{
-}
-
-[ExcludeMetadata, Route("/chat/status")]
-public class ChatStatus : IGet, IReturn<ChatStatusResponse>
-{
-}
-public class ChatStatusResponse
-{
-    public List<string> All { get; set; } = [];
-    public List<string> Enabled { get; set; } = [];
-    public List<string> Disabled { get; set; } = [];
-    public ResponseStatus? ResponseStatus { get; set; }
-}
-
-[ValidateApiKey]
-[ExcludeMetadata, Route("/chat/providers/{Id}")]
-public class UpdateChatProvider : IPost, IReturn<UpdateChatProviderResponse>
-{
-    [ValidateNotEmpty]
-    public string Id { get; set; }
-    public bool? Enable { get; set; }
-    public bool? Disable { get; set; }
-}
-public class UpdateChatProviderResponse
-{
-    public List<string> Enabled { get; set; } = [];
-    public List<string> Disabled { get; set; } = [];
-    public string? Feedback { get; set; }
-    public ResponseStatus? ResponseStatus { get; set; }
-}
-
-[ValidateApiKey]
-[ExcludeMetadata, Route("/chat/auth")]
-public class ChatAuth : IGet, IReturn<AuthenticateResponse>
-{
-}
-
-[ExcludeMetadata, Route("/chat/{**Path}")]
-public class ChatStaticFile : IGet, IReturn<byte[]>
-{
-    public string? Path { get; set; }
-}
-
-public record StatusResult(List<string> All, List<string> Enabled, List<string> Disabled);
-
-public class ChatServices(ILogger<ChatServices> log) : Service
-{
-    private async Task<(ChatFeature, IHttpResult?)> AssertAdminAccessAsync()
-    {
-        var (feature, error) = await AssertAccessAsync();
-        if (error != null)
-            return (feature, error);
-
-        var apiKey = Request.GetApiKey();
-        if (!apiKey.HasScope(RoleNames.Admin))
-        {
-            var user = await GetClaimsPrincipal(apiKey).ConfigAwait();
-            if (!user.HasRole(RoleNames.Admin))
-                return (feature, new HttpError(HttpStatusCode.Forbidden, "Requires Admin Role or Scope"));
-        }
-        return (feature, null);
-    }
-    private async Task<(ChatFeature, IHttpResult?)> AssertAccessAsync()
-    {
-        var feature = AssertPlugin<ChatFeature>();
-        if (feature.ValidateRequest != null)
-        {
-            var result = await feature.ValidateRequest(Request!).ConfigAwait();
-            return (feature, result);
-        }
-        return (feature, null);
-    }
-
-    public async Task<object> Get(ChatAuth request)
-    {
-        var (feature, error) = await AssertAccessAsync();
-        if (error != null) return error;
-
-        var apiKey = Request.GetApiKey()
-            ?? throw HttpError.Unauthorized("API Key Required");
-        var visibleKey = apiKey.Key.Length > 6 
-            ? apiKey.Key[..3] + "***" + apiKey.Key[^3..]
-            : null;
-
-        var user = await GetClaimsPrincipal(apiKey).ConfigAwait();
-        var roles = user.GetRoles().ToList();
-
-        if (apiKey.HasScope(RoleNames.Admin))
-            roles.AddIfNotExists(RoleNames.Admin);
-        
-        var profileUrl = user.GetPicture();
-
-        return new AuthenticateResponse
-        {
-            UserId = apiKey.UserAuthId,
-            UserName = user.GetUserName(),
-            DisplayName = user.GetDisplayName(),
-            ProfileUrl = profileUrl,
-            Roles = roles,
-            BearerToken = visibleKey,
-        };
-    }
-
-    private async Task<ClaimsPrincipal?> GetClaimsPrincipal(IApiKey apiKey)
-    {
-        var user = Request.GetClaimsPrincipal();
-        if (!user.IsAuthenticated())
-        {
-            var userResolver = Request!.GetService<IUserResolver>();
-            if (userResolver != null && apiKey.UserAuthId != null)
-            {
-                user = await userResolver.CreateClaimsPrincipalAsync(Request!, apiKey.UserAuthId!).ConfigAwait();
-            }
-        }
-
-        return user;
-    }
-
-    public StatusResult GetStatus(ChatFeature feature)
-    {
-        var all = feature.GetAllProviderKeys();
-        var disabled = all.Except(feature.Providers.Keys).ToList();
-        var enabled = feature.Providers.Keys.ToList();
-        return new StatusResult(all, enabled, disabled);
-    }
-
-    public async Task<object> Get(ChatModels request)
-    {
-        var (feature, error) = await AssertAccessAsync();
-        if (error != null) return error;
-        var models = new HashSet<string>();
-        foreach (var entry in feature.Providers)
-        {
-            models.AddDistinctRange(entry.Value.Models.Keys);
-        }
-        return models;
-    }
-
-    public async Task<object> Get(ChatConfig request)
-    {
-        var (feature, error) = await AssertAccessAsync();
-        if (error != null) return error;
-        var (all, enabled, disabled) = GetStatus(feature);
-        var uiConfig = new Dictionary<string, object>(feature.UiConfig!)
-        {
-            ["defaults"] = feature.Config!["defaults"],
-            ["status"] = new Dictionary<string, object> {
-                ["all"] = all,
-                ["enabled"] = enabled,
-                ["disabled"] = disabled,
-            },
-        };
-        return uiConfig;
-    }
-
-    public async Task<object> Get(ChatStatus request)
-    {
-        var (feature, error) = await AssertAccessAsync();
-        if (error != null) return error;
-        var (all, enabled, disabled) = GetStatus(feature);
-        return new ChatStatusResponse
-        {
-            All = all, 
-            Enabled = enabled, 
-            Disabled = disabled,
-        };
-    }
-
-    public async Task<object> Post(UpdateChatProvider request)
-    {
-        var (feature, error) = await AssertAdminAccessAsync();
-        if (error != null) return error;
-
-        string? feedback = null;
-        if (request.Enable == true)
-        {
-            log.LogDebug("Enable Provider {Id}", request.Id);
-            feedback = await feature.EnableProviderAsync(request.Id);
-        }
-        else if (request.Disable == true)
-        {
-            log.LogDebug("Disable Provider {Id}", request.Id);
-            await feature.DisableProviderAsync(request.Id);
-        }
-        
-        var (_, enabled, disabled) = GetStatus(feature);
-        return new UpdateChatProviderResponse
-        {
-            Enabled = enabled, 
-            Disabled = disabled,
-            Feedback = feedback,
-        };
-    }
-    
-    public async Task<object> Post(ChatCompletion request)
-    {
-        var (feature, error) = await AssertAccessAsync();
-        if (error != null) return error;
-        var response = await feature.ChatCompletionAsync(request, Request!).ConfigAwait();
-
-        // Remove IncludeNullValues jsconfig is specified to return cleaner output
-        return new HttpResult(response) {
-            ResultScope = () => {
-                var jsScope = JsConfig.CreateScope(HostContext.Config.AllowJsConfig 
-                    ? Request!.QueryString[Keywords.JsConfig] 
-                    : null) ?? JsConfig.With(new(){});
-                jsScope.IncludeNullValues = false;
-                return jsScope;
-            }
-        };
-    }
-    
-    public async Task<object> Get(ChatStaticFile request)
-    {
-        var path = request.Path.UrlDecode() ?? "";
-        if (path.Length == 0 || path.EndsWith('/'))
-            path = path.CombineWith("index.html");
-        
-        var checkPath = "chat".CombineWith(path);
-        var file = VirtualFileSources.GetFile(checkPath);
-        if (file == null)
-        {
-            if (path.IndexOf('.') >= 0)
-                throw HttpError.NotFound($"File {checkPath} not found");
-            file = VirtualFileSources.GetFile("chat/index.html");
-        }
-
-        if (file.Name.EndsWith(".html"))
-        {
-            var (feature, error) = await AssertAccessAsync();
-            if (error != null) return error;
-        }
-        
-        return new HttpResult(file);
     }
 }

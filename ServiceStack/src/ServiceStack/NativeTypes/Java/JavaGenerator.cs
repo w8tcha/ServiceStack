@@ -11,7 +11,8 @@ namespace ServiceStack.NativeTypes.Java;
 
 public class JavaGenerator : ILangGenerator
 {
-    readonly MetadataTypesConfig Config;
+    public Lang Lang => Lang.Java;
+    public MetadataTypesConfig Config { get; }
     List<string> conflictTypeNames = new();
     List<MetadataType> allTypes;
     readonly NativeTypesFeature feature;
@@ -126,6 +127,7 @@ public class JavaGenerator : ILangGenerator
 
     public string GetCode(MetadataTypes metadata, IRequest request, INativeTypesMetadata nativeTypes)
     {
+        var formatter = request.TryResolve<INativeTypesFormatter>();
         var typeNamespaces = new HashSet<string>();
         var includeList = RemoveIgnoredTypes(metadata);
         metadata.Types.Each(x => typeNamespaces.Add(x.Namespace));
@@ -163,9 +165,6 @@ public class JavaGenerator : ILangGenerator
             sb.AppendLine("Version: {0}".Fmt(Env.VersionString));
             sb.AppendLine("Tip: {0}".Fmt(HelpMessages.NativeTypesDtoOptionsTip.Fmt("//")));
             sb.AppendLine("BaseUrl: {0}".Fmt(Config.BaseUrl));
-            if (Config.UsePath != null)
-                sb.AppendLine("UsePath: {0}".Fmt(Config.UsePath));
-
             sb.AppendLine();
             sb.AppendLine("{0}Package: {1}".Fmt(defaultValue("Package"), Config.Package));
             sb.AppendLine("{0}GlobalNamespace: {1}".Fmt(defaultValue("GlobalNamespace"), globalNamespace));
@@ -184,6 +183,8 @@ public class JavaGenerator : ILangGenerator
             sb.AppendLine("*/");
             sb.AppendLine();
         }
+
+        formatter?.AddHeader(sb, this, request);
 
         var header = AddHeader?.Invoke(request);
         if (!string.IsNullOrEmpty(header))
@@ -308,8 +309,9 @@ public class JavaGenerator : ILangGenerator
         var addCode = AddCodeFilter?.Invoke(allTypes, Config);
         if (addCode != null)
             sb.AppendLine(addCode);
-
-        return StringBuilderCache.ReturnAndFree(sbInner);
+        
+        var ret = StringBuilderCache.ReturnAndFree(sbInner);
+        return formatter != null ? formatter.Transform(ret, this, request) : ret;
     }
 
     private bool ReferencesGson(MetadataTypes metadata)

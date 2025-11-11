@@ -11,7 +11,9 @@ namespace ServiceStack.NativeTypes.Python;
 
 public class PythonGenerator : ILangGenerator
 {
-    public readonly MetadataTypesConfig Config;
+    public Lang Lang => Lang.Python;
+    public MetadataTypesConfig Config { get; }
+
     readonly NativeTypesFeature feature;
     public List<string> ConflictTypeNames = new();
     public List<MetadataType> AllTypes { get; set; }
@@ -305,6 +307,7 @@ public class PythonGenerator : ILangGenerator
 
     public string GetCode(MetadataTypes metadata, IRequest request, INativeTypesMetadata nativeTypes)
     {
+        var formatter = request.TryResolve<INativeTypesFormatter>();
         Init(metadata);
 
         typeAliasValues ??= [..TypeAliases.Values];
@@ -313,9 +316,9 @@ public class PythonGenerator : ILangGenerator
         metadata.Types.Each(x => typeNamespaces.Add(x.Namespace));
         metadata.Operations.Each(x => typeNamespaces.Add(x.Request.Namespace));
 
-        var defaultImports = !Config.DefaultImports.IsEmpty()
+        List<string> defaultImports = new(!Config.DefaultImports.IsEmpty()
             ? Config.DefaultImports
-            : DefaultImports;
+            : DefaultImports);
 
         var globalNamespace = Config.GlobalNamespace;
 
@@ -331,14 +334,8 @@ public class PythonGenerator : ILangGenerator
             sb.AppendLine("Version: {0}".Fmt(Env.VersionString));
             sb.AppendLine("Tip: {0}".Fmt(HelpMessages.NativeTypesDtoOptionsTip.Fmt("#")));
             sb.AppendLine("BaseUrl: {0}".Fmt(Config.BaseUrl));
-            if (Config.UsePath != null)
-                sb.AppendLine("#UsePath: {0}".Fmt(Config.UsePath));
-
             sb.AppendLine();
             sb.AppendLine("{0}GlobalNamespace: {1}".Fmt(defaultValue("GlobalNamespace"), Config.GlobalNamespace));
-
-            // All properties are optional
-            // sb.AppendLine("{0}MakePropertiesOptional: {1}".Fmt(defaultValue("MakePropertiesOptional"), Config.MakePropertiesOptional));
             sb.AppendLine("{0}AddServiceStackTypes: {1}".Fmt(defaultValue("AddServiceStackTypes"), Config.AddServiceStackTypes));
             sb.AppendLine("{0}AddResponseStatus: {1}".Fmt(defaultValue("AddResponseStatus"), Config.AddResponseStatus));
             sb.AppendLine("{0}AddImplicitVersion: {1}".Fmt(defaultValue("AddImplicitVersion"), Config.AddImplicitVersion));
@@ -353,6 +350,8 @@ public class PythonGenerator : ILangGenerator
             sb.AppendLine("\"\"\"");
             sb.AppendLine();
         }
+
+        formatter?.AddHeader(sb, this, request);
 
         var header = AddHeader?.Invoke(request);
         if (!string.IsNullOrEmpty(header))
@@ -484,8 +483,9 @@ public class PythonGenerator : ILangGenerator
         }
             
         sb.AppendLine();
-
-        return StringBuilderCache.ReturnAndFree(sbInner);
+        
+        var ret = StringBuilderCache.ReturnAndFree(sbInner);
+        return formatter != null ? formatter.Transform(ret, this, request) : ret;
     }
 
     string AsIReturn(string genericArg) => $"IReturn[{genericArg}]";
@@ -565,7 +565,7 @@ public class PythonGenerator : ILangGenerator
 
             string responseTypeExpression = null;
             string responseMethod = options?.Op?.Method != null
-                ? $"def method(): return '{options?.Op?.Method}'"
+                ? $"def get_type_name(): return '{options?.Op?.Method}'"
                 : null;
 
             if (string.IsNullOrEmpty(implStr) && type.Type is {IsAbstract: true})
@@ -689,7 +689,7 @@ public class PythonGenerator : ILangGenerator
 
             AddProperties(sb, type,
                 includeResponseStatus: Config.AddResponseStatus && options.IsResponse
-                                                                && type.Properties.Safe().All(x => x.Name != nameof(ResponseStatus)));
+                    && type.Properties.Safe().All(x => x.Name != nameof(ResponseStatus)));
 
             if (responseTypeExpression != null)
             {
