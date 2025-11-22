@@ -6,11 +6,11 @@ jobs:
   myget-push:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup dotnet
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '8.0.100'
+          dotnet-version: 10.0.x
           
 
       - name: Download artifact
@@ -32,8 +32,8 @@ jobs:
       - name: Push to MyGet
         working-directory: ./build/staging
         run: |
-          # Check if more than 73 packages 
-          if [[ ${number_of_packages} -gt 73 ]]; then
+          # Check if more than 48 packages 
+          if [[ ${number_of_packages} -gt 48 ]]; then
             echo "Pushing to MyGet"
             dotnet nuget push '*.nupkg' -s 'https://www.myget.org/F/servicestack/api/v2/package' -k '${{ secrets.MYGET_APIKEY }}' --skip-duplicate
           else

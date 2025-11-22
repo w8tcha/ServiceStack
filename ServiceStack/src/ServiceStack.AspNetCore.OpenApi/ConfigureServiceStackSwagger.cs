@@ -4,10 +4,17 @@ using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace ServiceStack;
 
-public class ConfigureServiceStackSwagger(OpenApiMetadata metadata) : 
-    IConfigureOptions<SwaggerGenOptions>, 
+public class ConfigureServiceStackSwagger :
+    IConfigureOptions<SwaggerGenOptions>,
     IConfigureOptions<ServiceStackOptions>
 {
+    private readonly OpenApiMetadata metadata;
+
+    public ConfigureServiceStackSwagger(OpenApiMetadata metadata)
+    {
+        this.metadata = metadata;
+    }
+
     public void Configure(SwaggerGenOptions options)
     {
         foreach (var filterType in metadata.DocumentFilterTypes)
@@ -15,7 +22,7 @@ public class ConfigureServiceStackSwagger(OpenApiMetadata metadata) :
             options.DocumentFilterDescriptors.Add(new FilterDescriptor
             {
                 Type = filterType,
-                Arguments = [],
+                Arguments = [metadata],
             });
         }
         foreach (var filterType in metadata.SchemaFilterTypes)
