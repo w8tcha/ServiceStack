@@ -15,13 +15,6 @@ namespace ServiceStack.AspNetCore.OpenApi;
 
 public static class OpenApiSecurity
 {
-    public static OpenApiSecurityRequirement BasicAuth { get; } = new()
-    {
-        {
-            new OpenApiSecuritySchemeReference(BasicAuthenticationHandler.Scheme),
-            []
-        }
-    };
     public static OpenApiSecurityScheme BasicAuthScheme { get; set; } = new()
     {
         In = ParameterLocation.Header,
@@ -31,13 +24,6 @@ public static class OpenApiSecurity
         Scheme = BasicAuthenticationHandler.Scheme,
     };
 
-    public static OpenApiSecurityRequirement JwtBearer { get; } = new()
-    {
-        {
-            new OpenApiSecuritySchemeReference(JwtBearerDefaults.AuthenticationScheme),
-            []
-        }
-    };
     public static OpenApiSecurityScheme JwtBearerScheme { get; set; } = new()
     {
         In = ParameterLocation.Header,
@@ -48,13 +34,6 @@ public static class OpenApiSecurity
         Scheme = JwtBearerDefaults.AuthenticationScheme,
     };
 
-    public static OpenApiSecurityRequirement ApiKey { get; } = new()
-    {
-        {
-            new OpenApiSecuritySchemeReference("ApiKey"),
-            []
-        }
-    };
     public static OpenApiSecurityScheme ApiKeyScheme { get; set; } = new()
     {
         Description = "API Key authorization header using the Bearer scheme in the format `Bearer <ApiKey>`",
@@ -63,16 +42,28 @@ public static class OpenApiSecurity
         Type = SecuritySchemeType.ApiKey,
         Scheme = "ApiKey"
     };
+
+    /// <summary>
+    /// Create a security requirement for the given scheme that will serialize correctly.
+    /// The hostDocument is required for the OpenApiSecuritySchemeReference to resolve its Target.
+    /// </summary>
+    public static OpenApiSecurityRequirement CreateSecurityRequirement(string schemeId, OpenApiDocument hostDocument)
+    {
+        return new OpenApiSecurityRequirement
+        {
+            { new OpenApiSecuritySchemeReference(schemeId, hostDocument), [] }
+        };
+    }
 }
 
 public class OpenApiMetadata
 {
     public static OpenApiMetadata Instance { get; } = new();
     
-    public List<Type> DocumentFilterTypes { get; set; } = [
-        typeof(ServiceStackDocumentFilter),
+    public List<Type> DocumentTransformerTypes { get; set; } = [
+        typeof(ServiceStackDocumentTransformer),
     ];
-    public List<Type> SchemaFilterTypes { get; set; } = [
+    public List<Type> SchemaTransformerTypes { get; set; } = [
     ];
     
     public Func<Operation, bool>? Ignore { get; set; }
@@ -123,13 +114,11 @@ public class OpenApiMetadata
 
     public ConcurrentDictionary<string, OpenApiSchema> Schemas { get; } = new();
     internal static List<string> InlineSchemaTypesInNamespaces { get; set; } = new();
-    
+
     public OpenApiSecurityScheme? SecurityDefinition { get; set; }
-    public OpenApiSecurityRequirement? SecurityRequirement { get; set; }
-    
+
     public OpenApiSecurityScheme? ApiKeySecurityDefinition { get; set; }
-    public OpenApiSecurityRequirement? ApiKeySecurityRequirement { get; set; }
-    
+
     /// <summary>
     /// Exclude showing Request DTO APIs in Open API metadata and Swagger UI
     /// </summary>
@@ -138,22 +127,19 @@ public class OpenApiMetadata
     public void AddBasicAuth()
     {
         SecurityDefinition = OpenApiSecurity.BasicAuthScheme;
-        SecurityRequirement = OpenApiSecurity.BasicAuth;
     }
 
     public void AddJwtBearer()
     {
         SecurityDefinition = OpenApiSecurity.JwtBearerScheme;
-        SecurityRequirement = OpenApiSecurity.JwtBearer;
     }
 
     public void AddApiKeys()
     {
         ApiKeySecurityDefinition = OpenApiSecurity.ApiKeyScheme;
-        ApiKeySecurityRequirement = OpenApiSecurity.ApiKey;
     }
 
-    public OpenApiOperation AddOperation(OpenApiOperation op, Operation operation, string verb, string route)
+    public OpenApiOperation AddOperation(OpenApiOperation op, Operation operation, string verb, string route, OpenApiDocument? hostDocument = null)
     {
         if (ExcludeRequestTypes.Contains(operation.RequestType))
             return op;
@@ -229,7 +215,7 @@ public class OpenApiMetadata
                 var requestBody = new OpenApiRequestBody
                 {
                 };
-                var content = requestBody.Content ??= new OrderedDictionary<string, IOpenApiMediaType>();
+                var content = requestBody.Content ??= new OrderedDictionary<string, OpenApiMediaType>();
                 content[MimeTypes.MultiPartFormData] = formType;
                 if (apiAttr?.BodyParameter != GenerateBodyParameter.Never)
                 {
@@ -245,18 +231,18 @@ public class OpenApiMetadata
 
         if (operation.RequiresAuthentication)
         {
-            if (SecurityRequirement != null)
+            if (SecurityDefinition != null && hostDocument != null)
             {
                 op.Security ??= new List<OpenApiSecurityRequirement>();
-                op.Security.Add(SecurityRequirement);
+                op.Security.Add(OpenApiSecurity.CreateSecurityRequirement(SecurityDefinition.Scheme, hostDocument));
             }
         }
         if (operation.RequiresApiKey)
         {
-            if (ApiKeySecurityDefinition != null)
+            if (ApiKeySecurityDefinition != null && hostDocument != null)
             {
                 op.Security ??= new List<OpenApiSecurityRequirement>();
-                op.Security.Add(ApiKeySecurityRequirement);
+                op.Security.Add(OpenApiSecurity.CreateSecurityRequirement(ApiKeySecurityDefinition.Scheme, hostDocument));
             }
         }
 
@@ -805,10 +791,10 @@ public class OpenApiMetadata
         schemaProp.AdditionalPropertiesAllowed = schema?.AdditionalPropertiesAllowed ?? schemaProp.AdditionalPropertiesAllowed;
         schemaProp.AdditionalProperties = schema?.AdditionalProperties?.CreateShallowCopy();
         schemaProp.Discriminator = schema?.Discriminator != null ? new(schema.Discriminator) : null;
-        // In Microsoft.OpenApi 3.x, Example is read-only for some implementations; preserve existing example if available
-        // but avoid assigning directly when it's not supported.
-        if (schema?.Example is JsonNode exampleNode)
-            schemaProp.Example = exampleNode.DeepClone();
+        // Note: In Microsoft.OpenApi 3.x, Example property handling may vary by implementation
+        // The concrete OpenApiSchema class should support Example assignment
+        // if (schema?.Example is JsonNode exampleNode)
+        //     schemaProp.Example = exampleNode.DeepClone();
         schemaProp.Enum = schema?.Enum != null ? new List<JsonNode>(schema.Enum) : null;
         schemaProp.ExternalDocs = schema?.ExternalDocs != null ? new(schema.ExternalDocs) : null;
         schemaProp.Deprecated = schema?.Deprecated ?? schemaProp.Deprecated;
@@ -866,7 +852,7 @@ public class OpenApiMetadata
         Schemas[schemaId] = schema;
 
         var properties = schemaType.GetProperties()
-            .Where(pi => !SwaggerUtils.IgnoreProperty(pi))
+            .Where(pi => !OpenApiUtils.IgnoreProperty(pi))
             .ToArray();
 
         // Order schema properties by DataMember.Order if [DataContract] and [DataMember](s) defined
@@ -1068,7 +1054,7 @@ public class OpenApiMetadata
         {
             Description = !string.IsNullOrEmpty(schemaDescription) ? schemaDescription : "Success"
         };
-        var content = response.Content ??= new OrderedDictionary<string, IOpenApiMediaType>();
+        var content = response.Content ??= new OrderedDictionary<string, OpenApiMediaType>();
         content[MimeTypes.Json] = new OpenApiMediaType
         {
             Schema = responseSchema,
@@ -1083,7 +1069,7 @@ public class OpenApiMetadata
             {
                 Description = attr.Description ?? apiSchemaDescription
             };
-            var apiContent = apiResponse.Content ??= new OrderedDictionary<string, IOpenApiMediaType>();
+            var apiContent = apiResponse.Content ??= new OrderedDictionary<string, OpenApiMediaType>();
             apiContent[MimeTypes.Json] = new OpenApiMediaType
             {
                 Schema = attr.ResponseType != null

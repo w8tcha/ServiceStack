@@ -23,19 +23,6 @@ public static class ServiceStackOpenApiExtensions
         // configuration is needed, but it's currently a no-op.
     }
 
-    public static void AddSwagger(this ServiceStackServicesOptions options, Action<OpenApiMetadata>? configure = null)
-    {
-        configure?.Invoke(OpenApiMetadata.Instance);
-
-        options.Services!.AddSingleton(OpenApiMetadata.Instance);
-        options.Services!.AddSingleton<IConfigureOptions<SwaggerGenOptions>, ConfigureServiceStackSwagger>();
-        options.Services!.AddSingleton<IConfigureOptions<ServiceStackOptions>, ConfigureServiceStackSwagger>();
-        
-        options.Services!.ConfigurePlugin<MetadataFeature>(feature => {
-            feature.AddPluginLink("/swagger/index.html", "Swagger UI");
-        });
-    }
-
     public static void AddServiceStackSwagger(this IServiceCollection services, Action<OpenApiMetadata>? configure = null)
     {
         configure?.Invoke(OpenApiMetadata.Instance);
@@ -55,8 +42,14 @@ public static class ServiceStackOpenApiExtensions
         return new AuthenticationBuilder(services).AddBasicAuth<TUser,string>();
     }
 
-    public static void AddJwtAuth(this IServiceCollection services) {
+    public static IServiceCollection AddApiKeys(this IServiceCollection services) {
+        OpenApiMetadata.Instance.AddApiKeys();
+        return services;
+    }
+
+    public static IServiceCollection AddJwtAuth(this IServiceCollection services) {
         OpenApiMetadata.Instance.AddJwtBearer();
+        return services;
     }
 
     public static void AddBasicAuth(this SwaggerGenOptions options) =>

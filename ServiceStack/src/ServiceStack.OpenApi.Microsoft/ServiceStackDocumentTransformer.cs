@@ -1,29 +1,37 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 using ServiceStack.Host;
 using ServiceStack.Web;
-using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace ServiceStack.AspNetCore.OpenApi;
 
-// Last OpenApi Filter to run
-public class ServiceStackDocumentFilter(OpenApiMetadata metadata) : IDocumentFilter
+// ServiceStack Document Transformer for Microsoft.AspNetCore.OpenApi
+public class ServiceStackDocumentTransformer(OpenApiMetadata metadata) : IOpenApiDocumentTransformer
 {
-    public void Apply(OpenApiDocument swaggerDoc, DocumentFilterContext context)
+    public Task TransformAsync(OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken cancellationToken)
     {
-        //Console.WriteLine(GetType().Name + "...");
+        // Check if ServiceStack has been initialized
+        if (HostContext.AppHost == null)
+        {
+            // ServiceStack not yet initialized, skip for now
+            return Task.CompletedTask;
+        }
+
+        // Use AddComponent to properly register security schemes with the workspace
+        // This is required for OpenApiSecuritySchemeReference.Target to resolve correctly
         if (metadata.SecurityDefinition != null)
         {
-            swaggerDoc.Components.SecuritySchemes[metadata.SecurityDefinition.Scheme] = metadata.SecurityDefinition;
+            document.AddComponent(metadata.SecurityDefinition.Scheme, metadata.SecurityDefinition);
         }
 
         if (metadata.ApiKeySecurityDefinition != null)
         {
-            swaggerDoc.Components.SecuritySchemes[metadata.ApiKeySecurityDefinition.Scheme] = metadata.ApiKeySecurityDefinition;
+            document.AddComponent(metadata.ApiKeySecurityDefinition.Scheme, metadata.ApiKeySecurityDefinition);
         }
 
         // Ensure we have a Paths collection to populate
-        swaggerDoc.Paths ??= new OpenApiPaths();
+        document.Paths ??= new OpenApiPaths();
 
         var restPathMap = HostContext.ServiceController.RestPathMap;
 
@@ -50,7 +58,9 @@ public class ServiceStackDocumentFilter(OpenApiMetadata metadata) : IDocumentFil
             var schema = metadata.CreateSchema(type, allTypes: dtos);
             if (schema != null)
             {
-                swaggerDoc.Components.Schemas[OpenApiMetadata.GetSchemaTypeName(type)] = schema;
+                document.Components ??= new OpenApiComponents();
+                document.Components.Schemas ??= new Dictionary<string, IOpenApiSchema>();
+                document.Components.Schemas[OpenApiMetadata.GetSchemaTypeName(type)] = schema;
             }
         }
 
@@ -93,10 +103,10 @@ public class ServiceStackDocumentFilter(OpenApiMetadata metadata) : IDocumentFil
                     ? routePath.Substring(1)
                     : routePath;
 
-                if (!swaggerDoc.Paths.TryGetValue(swaggerPath, out var pathItem))
+                if (!document.Paths.TryGetValue(swaggerPath, out var pathItem))
                 {
                     pathItem = new OpenApiPathItem();
-                    swaggerDoc.Paths[swaggerPath] = pathItem;
+                    document.Paths[swaggerPath] = pathItem;
                 }
 
                 // Apply each verb for this RestPath
@@ -107,7 +117,7 @@ public class ServiceStackDocumentFilter(OpenApiMetadata metadata) : IDocumentFil
                         OperationId = $"{requestType.Name}{verb}{swaggerPath.Replace("/", "_").Replace("{", "_").Replace("}", string.Empty)}",
                     };
 
-                    openApiOp = metadata.AddOperation(openApiOp, opMeta, verb, routePath);
+                    openApiOp = metadata.AddOperation(openApiOp, opMeta, verb, routePath, document);
 
                     // Responses
                     var responses = GetResponses(metadata, restPath, requestType);
@@ -144,6 +154,8 @@ public class ServiceStackDocumentFilter(OpenApiMetadata metadata) : IDocumentFil
                 }
             }
         }
+
+        return Task.CompletedTask;
     }
 
     private static OrderedDictionary<string, OpenApiResponse> GetResponses(OpenApiMetadata metadata, IRestPath restPath, Type requestType)
@@ -178,7 +190,7 @@ public class ServiceStackDocumentFilter(OpenApiMetadata metadata) : IDocumentFil
         foreach (var pi in type.GetSerializableProperties())
         {
             // Skip Obsolete properties
-            if (SwaggerUtils.IgnoreProperty(pi))
+            if (OpenApiUtils.IgnoreProperty(pi))
                 continue;
             
             if (to.Contains(pi.PropertyType))
