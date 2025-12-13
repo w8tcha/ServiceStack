@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,6 +19,13 @@ public class NodeProxy
 {
     public HttpClient Client { get; set; }
     public ILogger? Log { get; set; }
+    
+    public string ProcessFileName { get; set; }
+    public string ProcessArguments { get; set; }
+    public Action<Process>? ConfigureProcess { get; set; }
+    public Action<Process>? ConfigureLinuxProcess { get; set; }
+    public Action<Process>? ConfigureMacProcess { get; set; }
+    public Action<Process>? ConfigureWindowsProcess { get; set; }
 
     /// <summary>
     /// Maximum size in bytes for an individual file to be cached (default: 5 MB)
@@ -127,6 +135,11 @@ public class NodeProxy
     {
         Client = client;
         ShouldCache = DefaultShouldCache;
+
+        // On Windows, npm is a batch file, so we need to use cmd.exe
+        var isWindows = OperatingSystem.IsWindows();
+        ProcessFileName = isWindows ? "cmd.exe" : "npm";
+        ProcessArguments = isWindows ? "/c npm run dev" : "run dev";
     }
     
     public bool LogDebug => Log != null && Log.IsEnabled(LogLevel.Debug);
@@ -214,46 +227,96 @@ public class NodeProxy
             return false;
         }
     }
+    
+    public bool IsPortAvailable() => HostContext.IsPortAvailable(Client.BaseAddress!.Port);
+
+    public bool WaitUntilAvailable(TimeSpan timeout)
+    {
+        var baseUrl = Client.BaseAddress!.ToString();
+        var startedAt = DateTime.UtcNow;
+        while (DateTime.UtcNow - startedAt < timeout)
+        {
+            try
+            {
+                var response = baseUrl.GetStringFromUrl();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Thread.Sleep(200);
+            }
+        }
+        return false;
+    }
 
     public bool TryStartNode(string workingDirectory, out Process process)
     {
-        process = new Process 
+        // Convert relative path to absolute path for Windows compatibility
+        var absoluteWorkingDir = Path.GetFullPath(workingDirectory);
+       
+        process = new Process
         {
             StartInfo = new() {
-                FileName = "npm",
-                Arguments = "run dev",
-                WorkingDirectory = workingDirectory,
+                FileName = ProcessFileName,
+                Arguments = ProcessArguments,
+                WorkingDirectory = absoluteWorkingDir,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
-            }, 
+            },
             EnableRaisingEvents = true,
         };
         process.StartInfo.RedirectStandardOutput = true;
         process.StartInfo.RedirectStandardError = true;
-        if (LogDebug)
+        process.OutputDataReceived += (s, e) => {
+            if (e.Data != null)
+            {
+                Log?.LogDebug(e.Data);
+            }
+        };
+        process.ErrorDataReceived += (s, e) => {
+            if (e.Data != null)
+            {
+                Log?.LogError(e.Data);
+            }
+        };
+       
+        try
         {
-            process.OutputDataReceived += (s, e) => {
-                if (e.Data != null)
-                {
-                    Log?.LogDebug(e.Data);
-                }
-            };
-            process.ErrorDataReceived += (s, e) => {
-                if (e.Data != null)
-                {
-                    Log?.LogError(e.Data);
-                }
-            };
+            if (ConfigureProcess != null)
+            {
+                ConfigureProcess(process);
+            }
+            if (ConfigureWindowsProcess != null && OperatingSystem.IsWindows())
+            {
+                ConfigureWindowsProcess(process);
+            }
+            else if (ConfigureMacProcess != null && OperatingSystem.IsMacOS())
+            {
+                ConfigureMacProcess(process);
+            }
+            else if (ConfigureLinuxProcess != null && OperatingSystem.IsLinux())
+            {
+                ConfigureLinuxProcess(process);
+            }
+            
+            Log?.LogInformation($"Starting Node.js dev server in: {absoluteWorkingDir}");
+            if (!process.Start())
+            {
+                Log?.LogError("Failed to start Node.js process");
+                return false;
+            }
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            Log?.LogInformation("Node.js dev server started successfully");
+            return true;
         }
-        if (!process.Start())
+        catch (Exception ex)
         {
+            Log?.LogError(ex, "Error starting Node.js process");
             return false;
         }
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();        
-        return true;
     }
 
     static bool IsHopByHopHeader(string headerName)
@@ -390,6 +453,230 @@ public class NodeProxy
 
         await response.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
     }
+
+    public string ConnectingHtml { get; set; } = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Connecting to Development Server</title>
+            <style>
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+                body {
+                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    min-height: 100vh;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    background: #0f0f1a;
+                    overflow: hidden;
+                }
+                .background {
+                    position: fixed;
+                    inset: 0;
+                    z-index: 0;
+                }
+                .background::before {
+                    content: '';
+                    position: absolute;
+                    top: -50%;
+                    left: -50%;
+                    width: 200%;
+                    height: 200%;
+                    background: 
+                        radial-gradient(circle at 20% 80%, rgba(6, 182, 212, 0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(20, 184, 166, 0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 40% 40%, rgba(34, 211, 238, 0.1) 0%, transparent 40%);
+                    animation: float 20s ease-in-out infinite;
+                }
+                @keyframes float {
+                    0%, 100% { transform: translate(0, 0) rotate(0deg); }
+                    33% { transform: translate(30px, -30px) rotate(5deg); }
+                    66% { transform: translate(-20px, 20px) rotate(-5deg); }
+                }
+                .container {
+                    position: relative;
+                    z-index: 1;
+                    text-align: center;
+                    padding: 3rem 4rem;
+                    background: rgba(255, 255, 255, 0.03);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border-radius: 24px;
+                    backdrop-filter: blur(20px);
+                    box-shadow: 
+                        0 25px 50px -12px rgba(0, 0, 0, 0.5),
+                        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                }
+                .icon-wrapper {
+                    width: 80px;
+                    height: 80px;
+                    margin: 0 auto 2rem;
+                    position: relative;
+                }
+                .pulse-ring {
+                    position: absolute;
+                    inset: 0;
+                    border-radius: 50%;
+                    border: 2px solid rgba(6, 182, 212, 0.3);
+                    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+                }
+                .pulse-ring:nth-child(2) { animation-delay: 0.5s; }
+                .pulse-ring:nth-child(3) { animation-delay: 1s; }
+                @keyframes pulse {
+                    0% { transform: scale(1); opacity: 1; }
+                    100% { transform: scale(2); opacity: 0; }
+                }
+                .icon-circle {
+                    position: absolute;
+                    inset: 0;
+                    background: linear-gradient(135deg, #0891b2 0%, #06b6d4 50%, #22d3ee 100%);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    box-shadow: 0 10px 40px rgba(6, 182, 212, 0.4);
+                }
+                .icon-circle svg {
+                    width: 36px;
+                    height: 36px;
+                    color: white;
+                    animation: rotate 3s linear infinite;
+                }
+                @keyframes rotate {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+                h1 {
+                    font-size: 1.75rem;
+                    font-weight: 600;
+                    color: #ffffff;
+                    margin-bottom: 0.75rem;
+                    letter-spacing: -0.025em;
+                }
+                .subtitle {
+                    font-size: 1rem;
+                    color: rgba(255, 255, 255, 0.5);
+                    margin-bottom: 2.5rem;
+                    font-weight: 400;
+                }
+                .progress-container {
+                    width: 100%;
+                    max-width: 280px;
+                    margin: 0 auto;
+                }
+                .progress-bar {
+                    height: 4px;
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 100px;
+                    overflow: hidden;
+                }
+                .progress-fill {
+                    height: 100%;
+                    width: 30%;
+                    background: linear-gradient(90deg, #0891b2, #22d3ee, #0891b2);
+                    background-size: 200% 100%;
+                    border-radius: 100px;
+                    animation: shimmer 1.5s ease-in-out infinite, progress 2s ease-in-out infinite;
+                }
+                @keyframes shimmer {
+                    0% { background-position: 200% 0; }
+                    100% { background-position: -200% 0; }
+                }
+                @keyframes progress {
+                    0% { width: 20%; margin-left: 0; }
+                    50% { width: 40%; margin-left: 30%; }
+                    100% { width: 20%; margin-left: 80%; }
+                }
+                .status {
+                    margin-top: 1.5rem;
+                    font-size: 0.875rem;
+                    color: rgba(255, 255, 255, 0.4);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.5rem;
+                }
+                .dot {
+                    width: 6px;
+                    height: 6px;
+                    background: #22c55e;
+                    border-radius: 50%;
+                    animation: blink 1.5s ease-in-out infinite;
+                }
+                @keyframes blink {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.3; }
+                }
+                .decorative-dots {
+                    position: absolute;
+                    width: 6px;
+                    height: 6px;
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 50%;
+                }
+                .decorative-dots:nth-child(1) { top: 20px; left: 20px; }
+                .decorative-dots:nth-child(2) { top: 20px; right: 20px; }
+                .decorative-dots:nth-child(3) { bottom: 20px; left: 20px; }
+                .decorative-dots:nth-child(4) { bottom: 20px; right: 20px; }
+            </style>
+        </head>
+        <body>
+            <div class="background"></div>
+            <div class="container">
+                <div class="decorative-dots"></div>
+                <div class="decorative-dots"></div>
+                <div class="decorative-dots"></div>
+                <div class="decorative-dots"></div>
+                <div class="icon-wrapper">
+                    <div class="pulse-ring"></div>
+                    <div class="pulse-ring"></div>
+                    <div class="pulse-ring"></div>
+                    <div class="icon-circle">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                    </div>
+                </div>
+                <h1>Starting Development Server</h1>
+                <p class="subtitle">Preparing your development environment</p>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                </div>
+                <div class="status">
+                    <span class="dot"></span>
+                    <span>Connecting to Node.js server...</span>
+                </div>
+            </div>
+            <script>
+                async function checkServer() {
+                    try {
+                        const response = await fetch('/', {
+                            method: 'HEAD',
+                            cache: 'no-cache'
+                        });
+                        if (response.ok) {
+                            window.location.reload();
+                        } else {
+                            setTimeout(checkServer, 200);
+                        }
+                    } catch (e) {
+                        // Server still not ready, try again
+                        setTimeout(checkServer, 200);
+                    }
+                }
+                // Start polling
+                checkServer();
+            </script>
+        </body>
+        </html>
+        """;
 }
 
 public static class ProxyExtensions
@@ -458,7 +745,16 @@ public static class ProxyExtensions
         {
             if (context.WebSockets.IsWebSocketRequest)
             {
-                await WebSocketToNode(context, proxy.Client.BaseAddress!);
+                try
+                {
+                    await WebSocketToNode(context, proxy.Client.BaseAddress!);
+                }
+                catch (WebSocketException ex) when (ex.InnerException is HttpRequestException { InnerException: SocketException })
+                {
+                    context.Response.StatusCode = 503;
+                    context.Response.ContentType = "text/html";
+                    await context.Response.WriteAsync(proxy.ConnectingHtml);
+                }
             }
             else
             {
@@ -480,7 +776,16 @@ public static class ProxyExtensions
             // Check if this is a WebSocket upgrade request
             if (context.WebSockets.IsWebSocketRequest)
             {
-                await WebSocketToNode(context, proxy.Client.BaseAddress!);
+                try
+                {
+                    await WebSocketToNode(context, proxy.Client.BaseAddress!);
+                }
+                catch (WebSocketException ex) when (ex.InnerException is HttpRequestException { InnerException: SocketException })
+                {
+                    context.Response.StatusCode = 503;
+                    context.Response.ContentType = "text/html";
+                    await context.Response.WriteAsync(proxy.ConnectingHtml);
+                }
             }
             else
             {
@@ -581,7 +886,7 @@ public static class ProxyExtensions
     }
 
     /// <summary>
-    /// Run Next.js dev server if not already running
+    /// Run Next.js dev server if not already running by checking for lock file
     /// </summary>
     public static System.Diagnostics.Process? RunNodeProcess(this WebApplication app,
         NodeProxy proxy,
@@ -632,9 +937,67 @@ public static class ProxyExtensions
 
         return null;
     }
+
+
+    /// <summary>
+    /// Run Next.js dev server if not already running by checking for port availability
+    /// </summary>
+    public static System.Diagnostics.Process? RunNodeProcess(this WebApplication app,
+        NodeProxy proxy,
+        string workingDirectory, 
+        bool registerExitHandler=true)
+    {
+        var process = app.StartNodeProcess(proxy, workingDirectory);
+        if (process != null)
+        {
+            proxy.Log?.LogInformation("Started Next.js dev server");
+        }
+        else
+        {
+            proxy.Log?.LogInformation("Next.js dev server already running");
+        }
+        return process;
+    }
+
+    public static System.Diagnostics.Process? StartNodeProcess(this WebApplication app, 
+        NodeProxy proxy,
+        string workingDirectory)
+    {
+        if (proxy.IsPortAvailable())
+        {
+            if (!proxy.TryStartNode(workingDirectory, out var process))
+                return null;
+
+            process.Exited += (s, e) => {
+                proxy.Log?.LogDebug("Exited: " + process.ExitCode);
+            };
+
+            app.Lifetime.ApplicationStopping.Register(() => {
+                if (!process.HasExited)
+                {
+                    proxy.Log?.LogDebug("Terminating process: " + process.Id);
+                    process.Kill(entireProcessTree: true);
+                }
+            });
+            return process;
+        }
+        return null;
+    }
     
     public static IEndpointConventionBuilder MapFallbackToNode(this WebApplication app, NodeProxy proxy)
     {
-        return app.MapFallback(proxy.HttpToNode);
+        return app.MapFallback(async (HttpContext context) =>
+        {
+            try
+            {
+                await proxy.HttpToNode(context);
+            }
+            catch (HttpRequestException ex) when (ex.InnerException is SocketException)
+            {
+                context.Response.StatusCode = 503;
+                context.Response.ContentType = "text/html";
+                await context.Response.WriteAsync(proxy.ConnectingHtml);
+            }
+        });
     }
 }

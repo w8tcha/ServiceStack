@@ -278,6 +278,7 @@ public class DbRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema,
     public int MaxLimit { get; set; } = 5000;
     public bool AutoInitSchema { get; set; } = true;
     public IAppHostNetCore AppHost { get; set; } = null!;
+    public ILogger? Logger { get; set; }
 
     public DbRequestLogger()
     {
@@ -426,6 +427,7 @@ public class DbRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema,
                       ?? throw new Exception($"{nameof(IDbConnectionFactory)} is not registered");
         DbProvider ??= DbLoggingProvider.Create(DbFactory, NamedConnection);
         AppHost ??= (IAppHostNetCore)appHost;        
+        Logger ??= appHost.TryResolve<ILogger>();
         
         ConfigureDialect?.Invoke(Dialect);
 
@@ -574,11 +576,21 @@ public class DbRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema,
         var ret = CreateAnalyticsReports();
         
         do {
-            batch = db.Select(
-                db.From<RequestLog>()
-                    .Where(x => x.Id > lastPk)
-                    .OrderBy(x => x.Id)
-                    .Limit(config.BatchSize));
+            try
+            {
+                batch = db.Select(
+                    db.From<RequestLog>()
+                        .Where(x => x.Id > lastPk)
+                        .OrderBy(x => x.Id)
+                        .Limit(config.BatchSize));
+            }
+            catch (Exception e)
+            {
+                Logger?.LogWarning(e, "GetAnalyticsReports(): SELECT RequestLog WHERE Id > {LastPk}: {Message}", 
+                    lastPk, e.Message);
+                lastPk += config.BatchSize; // avoid infinite loops
+                continue;
+            }
             
             foreach (var requestLog in batch)
             {
@@ -625,12 +637,22 @@ public class DbRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema,
         var ret = CreateAnalyticsReports();
         
         do {
-            batch = db.Select(
-                db.From<RequestLog>()
-                    .Where(x => x.Id > lastPk)
-                    .And(x => x.OperationName == op)
-                    .OrderBy(x => x.Id)
-                    .Limit(config.BatchSize));
+            try
+            {
+                batch = db.Select(
+                    db.From<RequestLog>()
+                        .Where(x => x.Id > lastPk)
+                        .And(x => x.OperationName == op)
+                        .OrderBy(x => x.Id)
+                        .Limit(config.BatchSize));
+            }
+            catch (Exception e)
+            {
+                Logger?.LogWarning(e, "GetApiAnalytics(): SELECT RequestLog WHERE Id > {LastPk} AND OperationName = {Op}: {Message}", 
+                    lastPk, op, e.Message);
+                lastPk += config.BatchSize; // avoid infinite loops
+                continue;
+            }
             
             foreach (var requestLog in batch)
             {
@@ -689,12 +711,22 @@ public class DbRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema,
         var ret = CreateAnalyticsReports();
         
         do {
-            batch = db.Select(
-                db.From<RequestLog>()
-                    .Where(x => x.Id > lastPk)
-                    .And(x => x.UserAuthId == userId)
-                    .OrderBy(x => x.Id)
-                    .Limit(config.BatchSize));
+            try
+            {
+                batch = db.Select(
+                    db.From<RequestLog>()
+                        .Where(x => x.Id > lastPk)
+                        .And(x => x.UserAuthId == userId)
+                        .OrderBy(x => x.Id)
+                        .Limit(config.BatchSize));
+            }
+            catch (Exception e)
+            {
+                Logger?.LogWarning(e, "GetUserAnalytics(): SELECT RequestLog WHERE Id > {LastPk} AND UserAuthId = {UserId}: {Message}", 
+                    lastPk, userId, e.Message);
+                lastPk += config.BatchSize; // avoid infinite loops
+                continue;
+            }
             
             foreach (var requestLog in batch)
             {
@@ -758,12 +790,22 @@ public class DbRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema,
         var ret = CreateAnalyticsReports();
         
         do {
-            batch = db.Select(
-                db.From<RequestLog>()
-                    .Where(x => x.Id > lastPk)
-                    .And(headers + " LIKE {0}", $"%Bearer {apiKey}%")
-                    .OrderBy(x => x.Id)
-                    .Limit(config.BatchSize));
+            try
+            {
+                batch = db.Select(
+                    db.From<RequestLog>()
+                        .Where(x => x.Id > lastPk)
+                        .And(headers + " LIKE {0}", $"%Bearer {apiKey}%")
+                        .OrderBy(x => x.Id)
+                        .Limit(config.BatchSize));
+            }
+            catch (Exception e)
+            {
+                Logger?.LogWarning(e, "GetApiKeyAnalytics(): SELECT RequestLog WHERE Id > {LastPk}: {Message}", 
+                    lastPk, e.Message);
+                lastPk += config.BatchSize; // avoid infinite loops
+                continue;
+            }
             
             foreach (var requestLog in batch)
             {
@@ -824,12 +866,22 @@ public class DbRequestLogger : InMemoryRollingRequestLogger, IRequiresSchema,
         var ret = CreateAnalyticsReports();
         
         do {
-            batch = db.Select(
-                db.From<RequestLog>()
-                    .Where(x => x.Id > lastPk)
-                    .And(x => x.IpAddress == ip)
-                    .OrderBy(x => x.Id)
-                    .Limit(config.BatchSize));
+            try
+            {
+                batch = db.Select(
+                    db.From<RequestLog>()
+                        .Where(x => x.Id > lastPk)
+                        .And(x => x.IpAddress == ip)
+                        .OrderBy(x => x.Id)
+                        .Limit(config.BatchSize));
+            }
+            catch (Exception e)
+            {
+                Logger?.LogWarning(e, "GetIpAnalytics(): SELECT RequestLog WHERE Id > {LastPk} AND IpAddress = {Ip}: {Message}", 
+                    lastPk, ip, e.Message);
+                lastPk += config.BatchSize; // avoid infinite loops
+                continue;
+            }
             
             foreach (var requestLog in batch)
             {
