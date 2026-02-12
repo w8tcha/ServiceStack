@@ -1,9 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
-using System.Globalization;
+using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
-using System.Threading;
 using NUnit.Framework;
 using ServiceStack.Text.Tests.DynamicModels.DataModel;
 
@@ -558,7 +557,7 @@ namespace ServiceStack.Text.Tests
         }
 
         [Test]
-        public void Can_deserialize_ordereddictionary()
+        public void Can_deserialize_OrderedDictionary()
         {
             var original = new OrderedDictionary {
                 {"Key1", "Value1"},
@@ -579,7 +578,7 @@ namespace ServiceStack.Text.Tests
         }
 
         [Test]
-        public void Can_deserialize_ordereddictionary_subclass()
+        public void Can_deserialize_OrderedDictionary_subclass()
         {
             var original = new OrderedDictionarySub {
                 {"Key1", "Value1"},
@@ -659,6 +658,37 @@ namespace ServiceStack.Text.Tests
             Assert.That(deserialized["DateTime"], Is.AssignableTo(typeof(DateTime)));
 
             JsConfig.Reset();
+        }
+        
+        [DataContract]
+        public class OpenApiDeclaration
+        {
+            [DataMember(Name = "paths")]
+            public OrderedDictionary<string, OpenApiPath> Paths { get; set; }
+        }
+        [DataContract]
+        public class OpenApiPath
+        {
+            [DataMember(Name = "$ref")]
+            public string Ref { get; set; }
+        }
+        
+        [Test]
+        public void Does_serialize_OrderedDictionary_as_Dictionary()
+        {
+            var dto = new OpenApiDeclaration
+            {
+                Paths = new OrderedDictionary<string, OpenApiPath>
+                {
+                    { "/api/v1/users", new OpenApiPath { Ref = "#/components/paths/Users_Get" } }
+                }
+            };
+
+            var json = JsonSerializer.SerializeToString(dto);
+            Assert.That(json, Is.EqualTo("{\"paths\":{\"/api/v1/users\":{\"$ref\":\"#/components/paths/Users_Get\"}}}"));
+            
+            var fromJson = JsonSerializer.DeserializeFromString<OpenApiDeclaration>(json);
+            Assert.That(fromJson.Paths["/api/v1/users"].Ref, Is.EqualTo("#/components/paths/Users_Get"));
         }
     }
 
