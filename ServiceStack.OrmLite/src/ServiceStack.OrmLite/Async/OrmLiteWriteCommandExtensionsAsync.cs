@@ -419,7 +419,7 @@ internal static class OrmLiteWriteCommandExtensionsAsync
 
     internal static Task InsertAsync<T>(this IDbCommand dbCmd, Action<IDbCommand> commandFilter, CancellationToken token, T[] objs)
     {
-        return InsertAllAsync(dbCmd, objs, commandFilter, token);
+        return InsertAllAsync(dbCmd, objs, commandFilter, token:token);
     }
         
     internal static async Task InsertUsingDefaultsAsync<T>(this IDbCommand dbCmd, T[] objs, CancellationToken token)
@@ -456,32 +456,54 @@ internal static class OrmLiteWriteCommandExtensionsAsync
     internal static async Task<long> InsertIntoSelectAsync<T>(this IDbCommand dbCmd, ISqlExpression query, Action<IDbCommand> commandFilter, CancellationToken token) => 
         OrmLiteReadCommandExtensions.ToLong(await dbCmd.InsertIntoSelectInternal<T>(query, commandFilter).ExecNonQueryAsync(token: token).ConfigAwait());
 
-    internal static async Task InsertAllAsync<T>(this IDbCommand dbCmd, IEnumerable<T> objs, Action<IDbCommand> commandFilter, CancellationToken token)
+    internal static async Task InsertAllAsync<T>(this IDbCommand dbCmd, IEnumerable<T> objs, Action<IDbCommand> commandFilter, bool enableIdentityInsert=false, CancellationToken token = default)
     {
         OrmLiteUtils.AssertNotAnonType<T>();
             
         IDbTransaction dbTrans = null;
 
-        if (dbCmd.Transaction == null)
-            dbCmd.Transaction = dbTrans = dbCmd.Connection.BeginTransaction();
-
-        var dialectProvider = dbCmd.GetDialectProvider();
-
-        dialectProvider.PrepareParameterizedInsertStatement<T>(dbCmd);
-
-        using (dbTrans)
+        try
         {
-            foreach (var obj in objs)
+            if (dbCmd.Transaction == null)
+                dbCmd.Transaction = dbTrans = dbCmd.Connection.BeginTransaction();
+
+            var dialectProvider = dbCmd.GetDialectProvider();
+            if (enableIdentityInsert)
             {
-                OrmLiteConfig.InsertFilter?.Invoke(dbCmd, obj);
-
-                dialectProvider.SetParameterValues<T>(dbCmd, obj);
-
-                commandFilter?.Invoke(dbCmd); //filters can augment SQL & only should be invoked once
-                commandFilter = null;
-
-                await dbCmd.ExecNonQueryAsync(token).ConfigAwait();
+                await dialectProvider.EnableIdentityInsertAsync<T>(dbCmd, token);
             }
+            try
+            {
+                foreach (var obj in objs)
+                {
+                    OrmLiteConfig.InsertFilter?.Invoke(dbCmd, obj);
+
+                    var pkField = ModelDefinition<T>.Definition.FieldDefinitions.FirstOrDefault(f => f.IsPrimaryKey);
+                    if (!enableIdentityInsert || pkField is not { AutoIncrement: true })
+                    {
+                        dialectProvider.PrepareParameterizedInsertStatement<T>(dbCmd,
+                            insertFields: dialectProvider.GetNonDefaultValueInsertFields<T>(obj));
+                    }
+                    else
+                    {
+                        dialectProvider.PrepareParameterizedInsertStatement<T>(dbCmd,
+                            insertFields: dialectProvider.GetNonDefaultValueInsertFields<T>(obj),
+                            shouldInclude: f => f == pkField);
+                    }
+
+                    await InsertInternalAsync<T>(dialectProvider, dbCmd, obj, commandFilter, selectIdentity:false, token);
+                }
+            }
+            finally
+            {
+                if (enableIdentityInsert)
+                {
+                    await dialectProvider.DisableIdentityInsertAsync<T>(dbCmd, token);
+                }
+            }
+        }
+        finally
+        {
             dbTrans?.Commit();
         }
     }
